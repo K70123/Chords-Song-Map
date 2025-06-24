@@ -13,7 +13,7 @@ let nextChordFocus = null; // To track the next chord to focus after editing
 let nextSongMapFocusIdx = null; // To track the next song map part to focus after editing
 
 // Load or initialize liveSongsData
-let liveSongsData = JSON.parse(localStorage.getItem('livesongsData') || '{}');
+let liveSongsData = JSON.parse(localStorage.getItem('liveSongsData') || '{}');
 
 // --- UI Rendering ---
 function renderUI() {
@@ -87,9 +87,9 @@ function renderUI() {
       localStorage.setItem('liveSongs', JSON.stringify(liveSongs));
 
       // Remove livesongsdata for this song from localStorage
-      let livesongsdata = JSON.parse(localStorage.getItem('livesongsData') || '{}');
-      delete liveSongsData[songName]; // Use delete to fully remove
-      localStorage.setItem('livesongsData', JSON.stringify(livesongsdata));
+      let liveSongsdata = JSON.parse(localStorage.getItem('liveSongsData') || '{}');
+      delete liveSongsdata[songName]; // Use delete to fully remove
+      localStorage.setItem('liveSongsData', JSON.stringify(liveSongsdata));
       // Remove the song from the dropdown menu
       li.remove();
     });
@@ -156,7 +156,7 @@ function renderUI() {
         : [];
         }
         liveSongsData[songName] = songObj; // Save the copy for future edits
-        localStorage.setItem('livesongsData', JSON.stringify(liveSongsData));
+        localStorage.setItem('liveSongsData', JSON.stringify(liveSongsData));
       }
       break;
     }
@@ -201,7 +201,7 @@ function renderUI() {
                 songObj.songMap = [];
               }
               songObj.songMap.push("Unknown");
-              localStorage.setItem('livesongsData', JSON.stringify(liveSongsData));
+              localStorage.setItem('liveSongsData', JSON.stringify(liveSongsData));
               // Remebers which song map list to open
               localStorage.setItem('songMapList', songObj.name);
               showAllLiveSongsAndSections();
@@ -242,7 +242,7 @@ function renderUI() {
               if (part.textContent.trim() === '') {
                 songObj.songMap.splice(idx, 1);
               }
-              localStorage.setItem('livesongsData', JSON.stringify(liveSongsData));
+              localStorage.setItem('liveSongsData', JSON.stringify(liveSongsData));
               localStorage.setItem('songMapList', songObj.name);
               showAllLiveSongsAndSections();
             }
@@ -392,7 +392,7 @@ function renderUI() {
               }
               else {
                 liveSongsData[songObj.name].currentKey = key; // Store the selected key in live data
-                localStorage.setItem('livesongsData', JSON.stringify(liveSongsData)); // Persist the change
+                localStorage.setItem('liveSongsData', JSON.stringify(liveSongsData)); // Persist the change
                 showAllLiveSongsAndSections();
               }
             }
@@ -462,7 +462,7 @@ function renderUI() {
                 liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
               }
               liveSongsData[songObj.name].chords[sectionIdx].chords.push("• • • •");
-              localStorage.setItem('livesongsData', JSON.stringify(liveSongsData));
+              localStorage.setItem('liveSongsData', JSON.stringify(liveSongsData));
               if (!liveSongsData[songObj.name]) {
                 liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
               }
@@ -482,7 +482,7 @@ function renderUI() {
               liveSongsData[songObj.name].chords.splice(sectionIdx, 1);
 
               // Save changes to localStorage if needed
-              localStorage.setItem('livesongsData', JSON.stringify(liveSongsData));
+              localStorage.setItem('liveSongsData', JSON.stringify(liveSongsData));
               showAllLiveSongsAndSections();
             });
       
@@ -567,33 +567,43 @@ function renderUI() {
                         }
                       }
                       chordSpan.remove(); // Also remove the chord span itself from DOM
-                      localStorage.setItem('livesongsData', JSON.stringify(liveSongsData));
+                      localStorage.setItem('liveSongsData', JSON.stringify(liveSongsData));
                     }
-                    localStorage.setItem('livesongsData', JSON.stringify(liveSongsData));
+                    localStorage.setItem('liveSongsData', JSON.stringify(liveSongsData));
                   }
                   else {
                     // Just update the chord text in data
                     liveSongsData[songObj.name].chords[sectionIdx].chords[chordIdx] = chordSpan.textContent.trim();
-                    localStorage.setItem('livesongsData', JSON.stringify(liveSongsData));
+                    localStorage.setItem('liveSongsData', JSON.stringify(liveSongsData));
                   }
                 });
               });
             });
 
             // Rename Chord Section (attach only once per section)
-            sectionTitle.addEventListener('dblclick', function(e) {
-              e.preventDefault();
-              const newSectionName = prompt('Enter new name for this section:', sectionTitle.textContent);
-              if (newSectionName !== null && newSectionName.trim() !== "") {
-                // Find the index of this sectionTitle among all section titles within the current song's container
-                const allSectionTitles = Array.from(sectionDiv.parentNode.querySelectorAll('.sectionTitle'));
-                const idx = allSectionTitles.indexOf(sectionTitle);
-                if (idx !== -1 && liveSongsData[songObj.name] && liveSongsData[songObj.name].chords[idx]) {
-                  liveSongsData[songObj.name].chords[idx].section = newSectionName;
-                  localStorage.setItem('liveSongsData', JSON.stringify(liveSongsData));
-                  showAllLiveSongsAndSections();
+            sectionTitle.addEventListener('dblclick', function() {
+              sectionTitle.contentEditable = true;
+              sectionTitle.focus();
+              sectionTitle.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter'){
+                  e.preventDefault();
+                  sectionTitle.blur();
                 }
-              }
+              });
+              sectionTitle.addEventListener('blur', function() {
+                sectionTitle.contentEditable = false;
+                newSectionName = sectionTitle.textContent;
+                if (newSectionName !== null && newSectionName.trim() !== "") {
+                  // Find the index of this sectionTitle among all section titles within the current song's container
+                  const allSectionTitles = Array.from(sectionDiv.parentNode.querySelectorAll('.sectionTitle'));
+                  const idx = allSectionTitles.indexOf(sectionTitle);
+                  if (idx !== -1 && liveSongsData[songObj.name] && liveSongsData[songObj.name].chords[idx]) {
+                    liveSongsData[songObj.name].chords[idx].section = newSectionName;
+                    localStorage.setItem('liveSongsData', JSON.stringify(liveSongsData));
+                    showAllLiveSongsAndSections();
+                  }
+                }
+              });
             });
           });
         }
@@ -998,15 +1008,24 @@ function renderUI() {
     // Rename Chord Section
     const songSections = document.querySelectorAll('.sectionTitle');
     songSections.forEach(section => {
-      section.addEventListener('dblclick', function(e) {
-        e.preventDefault();
-        const newSectionName = prompt('Enter new name for this section:', section.textContent);
-        if (newSectionName !== null && newSectionName.trim() !== "") {
-          const idx = Array.from(songSections).indexOf(section);
-          currentSongObj.chords[idx].section = newSectionName;
-          saveData();
-          renderUI();
-        }
+      section.addEventListener('dblclick', function() {
+        section.contentEditable = true
+        section.focus();
+        section.addEventListener('keydown', function(e) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            section.blur();
+          }
+        });
+        section.addEventListener('blur', function() {
+          const sectionTitle = section.textContent;
+          if (sectionTitle !== null && sectionTitle.trim() !== "") {
+            const idx = Array.from(songSections).indexOf(section);
+            currentSongObj.chords[idx].section = sectionTitle;
+            saveData();
+            renderUI();
+          }
+        });
       });
     });
   }
