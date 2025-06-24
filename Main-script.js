@@ -4,6 +4,8 @@ let appData = JSON.parse(localStorage.getItem('chordAppData'));
 function saveData() {
   localStorage.setItem('chordAppData', JSON.stringify(appData));
 }
+localStorage.clear()
+location.reload()
 
 window.keyList = [
   'A', 'A#', 'Bb', 'B', 'C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'Num'
