@@ -1328,7 +1328,7 @@ function darkMode(){
 
 // --- Go To Main Page ---
 function main(){
-    window.location.href = 'Home Page.html';
+    window.location.href = 'index.html';
 }
 
 
