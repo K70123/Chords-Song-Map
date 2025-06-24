@@ -270,7 +270,7 @@ function renderUI() {
           songObj.songMap = reorderedParts;
 
           liveSongsData[songObj.name] = songObj;
-          localStorage.setItem('livesongsData', JSON.stringify(liveSongsData));
+          localStorage.setItem('liveSongsData', JSON.stringify(liveSongsData));
 
           showAllLiveSongsAndSections();
         });
