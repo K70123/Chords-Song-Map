@@ -26,6 +26,7 @@ button{
   width: 100%;
   justify-content: center;
   align-items: start;
+  padding-bottom: 100px; 
 }
 
 .songContainer{
@@ -45,7 +46,11 @@ button{
 .dropdown-menu ul li {
   display: block;
   font-size: 20px;
-  padding: 2px;
+  margin-bottom: -8px;
+}
+[contentEditable="true"] {
+    outline: none;
+    border: 0;
 }
 
 
@@ -88,11 +93,6 @@ button span {
 }
 #darkBtnIcon{
   visibility: visible;
-}
-button:hover span {
-  visibility: visible;
-}
-#darkBtnIcon{
   font-size: 50px;
   height: 70px;
   width: 70px;
@@ -100,6 +100,9 @@ button:hover span {
   bottom: 0;
   left: 100%;
   border: 0;
+}
+button:hover span {
+  visibility: visible;
 }
 
 a{
@@ -155,7 +158,7 @@ a{
 .editBtn {
   display: flex;
   opacity: 0;
-  width: 150px;
+  width: 100%;
   align-items: center;
   justify-content: center;
 }
@@ -163,23 +166,6 @@ a{
   opacity: 1;
   text-align: center;
   align-items: center;
-}
-.linkInput{
-  font-size: 24px;
-  border: none;
-  outline: none;
-  text-align: center;
-}
-.linkInput-mirror {
-  position: absolute;
-  visibility: hidden;
-  height: 0;
-  overflow: hidden;
-  font-size: 24px;
-  font-family: inherit;
-  font-weight: inherit;
-  letter-spacing: inherit;
-  white-space: pre;
 }
 
 .containerBtn{
@@ -199,4 +185,67 @@ a{
   height: 0;
   overflow: hidden;
   font-size: 30px;
+}
+
+@media only screen and (max-width: 600px) {
+#title {
+  font-size: 23px;
+  text-align: center;
+  margin-bottom: 40px;
+  font-weight: bold;
+}
+body {
+  margin-top: 15px;
+}
+.artist {
+  font-size: 18px;
+}
+.bottomBtn {
+  position: fixed;
+  bottom: 10px;
+  font-size: 35px;
+  background-color: white;
+  cursor: pointer;
+  border-radius: 7px;
+  height: 45px;
+  width: 45px;
+}
+#liveBtn {
+  width: 80px;
+  left: 0;
+}
+#darkBtn {
+  left: 39.5%;
+  width: 48px;
+}
+#addArtistBtn {
+  right: 0;
+}
+#darkBtnIcon {
+  font-size: 38px;
+  height: 42px;
+  width: 102px;
+  left: 100%;
+}
+button:hover span {
+  visibility: hidden;
+}
+a {
+  font-size: 15px;
+}
+.newSongBtn {
+  font-size: 12px;
+}
+.containerRenameBtn{
+  font-size: 10px;
+}
+.containerDeleteBtn{
+  font-size: 10px;
+}
+.artistInput{
+  font-size: 18px;
+}
+.container{
+  padding-bottom: 50px; 
+}
 }
