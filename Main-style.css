@@ -269,7 +269,6 @@ body.dark-mode .deleteSectionBtn{
 hr {
     border: 1px solid #757678;
     width: 100%;
-    margin: 10px 0;
 }
 .editBtn {
     display: none;
@@ -311,6 +310,18 @@ hr {
     background-color: rgb(12, 95, 23);
 }
 
+.songMapContainer, .liveSongMapContainer {
+    overflow-y: auto;             /* only show scrollbar when needed */
+    scrollbar-width: none;        /* Firefox */
+    -ms-overflow-style: none;     /* IE 10+ */
+}
+
+/* WebKit browsers */
+.songMapContainer::-webkit-scrollbar,
+.liveSongMapContainer::-webkit-scrollbar {
+    display: none;
+}
+
 
 h1 {
     text-align: center;
@@ -333,4 +344,102 @@ ol {
 }
 ul {
     font-size: 35px;
+}
+
+@media only screen and (max-width: 600px) {
+body {
+    overflow: hidden;
+}
+.title{
+    font-size: 28px;
+}
+
+button{
+    background-color: transparent;
+    color: white;
+    border: none;
+    font-size: 34px;
+    cursor: pointer;
+    border-radius: 5px;
+    margin: 10px;
+}
+.leftContainer {
+    width: 120px;
+    left: 56px;
+    padding-top: 16px;
+    padding-inline: 8px;
+}
+.menu{
+    width: 38px;
+    display: none;
+}
+.dropdown-menu{
+    width: 100px;
+}
+.liveTitle {
+    font-size: 21px;
+}
+.artistName {
+    font-size: 15px;
+}
+.songName {
+    font-size: 15px;
+}
+
+
+.songMapContainer, .liveSongMapContainer {
+    padding: 3px;
+    width: 68px;
+    height: 325px;
+    right: 0;
+    border: 0.2px 0.2px solid;
+}
+.songMapTitle {
+    font-size: 15px;
+    margin-bottom: 8px;
+}
+.songMapList {
+    font-size: 11.5px;
+    padding: 0;
+    margin: 0;
+    margin-bottom: 14px;
+}
+.addPartBtn{
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+}
+
+
+.keyContainer{
+    margin-top: 7px;
+    grid-template-columns: 30px 30px 30px 30px 30px 30px 30px 30px 30px;
+}
+.key{
+    font-size: 12px;
+    padding: 4px;
+    margin: 0;
+}
+.numKey{
+    font-size: 10.5px;
+}
+.rightContainer, .liveRightContainer {
+    padding: 0;
+    font-size: 14.5px;
+}
+.songSectionContainer {
+    width: 100%;
+}
+.sectionTitle{
+    margin-bottom: 4px;
+    margin-left: 6px;
+    font-size: 15.5px;
+    margin-top: 6px;
+}
+.addChordBtn,.addChordSectionBtn, .deleteSectionBtn {
+    font-size: 26px;
+    border: 2px solid;
+    width: 26px;
+    height: 26px;
+}
 }
