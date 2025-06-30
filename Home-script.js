@@ -10,6 +10,10 @@ function saveData() {
 
 // --- UI Rendering ---
 function renderUI() {
+  let lastTap = 0;
+  const tapThreshold = 300; // max ms between taps to count as double-tap
+
+
   // Dark Mode
   const isDarkMode = localStorage.getItem('darkMode') === 'true';
   const darkBtnSpan = document.querySelector('#darkBtnSpan');
@@ -21,6 +25,10 @@ function renderUI() {
       darkBtnIcon.textContent = '☼';
       darkBtnIcon.style.height = '62px';
       darkBtnIcon.style.width = '64.5px';
+      if (window.innerWidth < 600) {
+        darkBtnIcon.style.height = '36px';
+        darkBtnIcon.style.width = '95px';
+      }
     } 
     else {
     document.body.classList.remove('dark-mode');
@@ -52,14 +60,30 @@ function renderUI() {
 
     // Right-click the artist name to show buttons
     artistDiv.addEventListener('contextmenu', function(e) {
-    e.preventDefault();
+      e.preventDefault();
     // Hide all other containerBtn first
     document.querySelectorAll('.containerBtn').forEach(btn => {
       btn.style.display = 'none';
     });
     // Show this artist's buttons
     containerBtn.style.display = 'block';
-  });
+    });
+    
+    artistDiv.addEventListener('touchstart', function (e) {
+      const currentTime = new Date().getTime();
+      const tapLength = currentTime - lastTap;
+
+      if (tapLength < tapThreshold && tapLength > 0) {
+        document.querySelectorAll('.containerBtn').forEach(btn => {
+          btn.style.display = 'none';
+        });
+        // Show this artist's buttons
+        containerBtn.style.display = 'block';
+      }
+
+      lastTap = currentTime;
+    });
+
 
 
     // Artist buttons
@@ -173,41 +197,46 @@ function renderUI() {
       renameSongBtn.className = 'renameBtn';
       renameSongBtn.textContent = '✏️';
       renameSongBtn.onclick = () => {
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.value = song.name;
-        input.className = 'linkInput';
-        songLink.replaceWith(input);
-        input.focus();
+        // Temporarily store href and disable the link
+        const originalHref = songLink.getAttribute('href');
+        songLink.removeAttribute('href');
+        songLink.style.pointerEvents = 'none';
+        songLink.setAttribute('contenteditable', 'true');
+        songLink.focus();
 
-        // Mirror for width
-        const mirror = document.createElement('span');
-        mirror.className = 'linkInput-mirror';
-        document.body.appendChild(mirror);
-        function updateInputWidth() {
-          mirror.textContent = input.value || ' ';
-          input.style.width = (mirror.offsetWidth) + 'px';
-        }
-        updateInputWidth();
-        input.addEventListener('input', updateInputWidth);
+        // Select all text inside the link
+        const range = document.createRange();
+        range.selectNodeContents(songLink);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
 
         function restore() {
+          songLink.removeAttribute('contenteditable');
+          const newName = songLink.textContent.trim() || 'Untitled';
+          songLink.setAttribute('href', originalHref);
+
           // Store the index of the artist whose dropdown should be open
           localStorage.setItem('openDropdownArtistIdx', artistIdx);
 
           // Update the song name
-          appData[artistIdx].songs[songIdx].name = input.value.trim() || 'Untitled';
+          appData[artistIdx].songs[songIdx].name = newName;
 
           // Sort songs alphabetically by name (case-insensitive)
           appData[artistIdx].songs.sort((a, b) =>
             a.name.toLowerCase().localeCompare(b.name.toLowerCase())
           );
 
-          document.body.removeChild(mirror);
           saveData();
           renderUI();
         }
-        input.addEventListener('blur', restore);
+        songLink.addEventListener('blur', restore);
+        songLink.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          e.preventDefault(); // prevent newline
+          songLink.blur(); // trigger blur to save
+          }
+        });
       };
 
       // Delete song button
@@ -313,6 +342,21 @@ function renderUI() {
         if (menu !== dropdownMenu) menu.style.display = 'none';
       });
     };
+
+    artistDiv.ontouchstart = () => {
+      const currentTime = Date.now();
+      const timeDiff = currentTime - lastTap;
+
+      if (timeDiff < tapThreshold && timeDiff > 0) {
+        dropdownMenu.style.display = dropdownMenu.style.display === 'block' ? 'none' : 'block';
+        // Close other dropdowns
+        document.querySelectorAll('.dropdown-menu').forEach(menu => {
+          if (menu !== dropdownMenu) menu.style.display = 'none';
+        });
+      }
+      lastTap = currentTime;
+    }
+    
   });
 
 
@@ -364,11 +408,19 @@ function darkMode(){
       textSpan.textContent = 'Light Mode';
       iconSpan.style.height = '62px';
       iconSpan.style.width = '64.5px';
+      if (window.innerWidth < 600) {
+        iconSpan.style.height = '36px';
+        iconSpan.style.width = '95px';
+      }
     } else {
       iconSpan.textContent = '☾⋆';
       textSpan.textContent = 'Dark Mode';
       iconSpan.style.height = '70px';
       iconSpan.style.width = '70px';
+      if (window.innerWidth < 600) {
+        iconSpan.style.height = '42px';
+        iconSpan.style.width = '102px';
+      }
     }
   localStorage.setItem('darkMode', isDarkMode);
   }
