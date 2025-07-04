@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chords & Song Map</title>
+    <link rel="stylesheet" href="login.css">
+</head>
+<body>
+<h1>🎵Chords & Song Map🎵</h1>
+
+<script>
+  if (localStorage.getItem('rememberMe') === 'true' && localStorage.getItem('currentUser')) {
+    window.location.href = 'Home-index.html';
+  }
+</script>
+
+<div class="modal">
+  
+  <form class="modal-content animate" action="Home-index.html" method="post">
+
+    <div class="container">
+      <label for="uname"><b>Username</b></label>
+      <input type="text" placeholder="Enter Username" name="uname" required>
+
+      <label for="psw"><b>Password</b></label>
+      <input type="password" placeholder="Enter Password" name="psw" required>
+        
+      <button type="submit">Login</button>
+      <label>
+        <input type="checkbox" checked="checked" name="remember"> Remember me
+      </label>
+    </div>
+
+    <div class="container" style="background-color:#f1f1f1">
+      <span class="bottomText signUp">Don't have account? <a href="signUp.html">Sign Up</a></span>
+      <span class="bottomText psw">Forgot <a href="#">password?</a></span>
+    </div>
+  </form>
+</div>
+
+<script src="login.js"></script>
+</body>
