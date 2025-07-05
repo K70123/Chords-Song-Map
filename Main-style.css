@@ -369,6 +369,7 @@ button{
 #mainBtn, #darkBtn, #manualBtn {
     display: none;
 }
+
 .dropdown-menu{
     width: 100px;
 }
@@ -381,12 +382,15 @@ button{
 .songName {
     font-size: 15px;
 }
+.line{
+    margin: 0 1.5px;
+}
 
 
 .songMapContainer, .liveSongMapContainer {
     padding: 2px;
     width: 110px;
-    height: 350px;
+    height: 380px;
     right: 0;
     border: 0.2px 0.2px solid;
 }
@@ -422,7 +426,7 @@ button{
 }
 .rightContainer, .liveRightContainer {
     padding: 0;
-    font-size: 14.5px;
+    font-size: 15px;
 }
 .songSectionContainer {
     width: 100%;
