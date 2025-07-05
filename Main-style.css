@@ -385,13 +385,13 @@ button{
 
 .songMapContainer, .liveSongMapContainer {
     padding: 2px;
-    width: 70px;
+    width: 95px;
     height: 350px;
     right: 0;
     border: 0.2px 0.2px solid;
 }
 .songMapTitle {
-    font-size: 15px;
+    font-size: 14px;
     margin-bottom: 8px;
 }
 .songMapList {
