@@ -68,39 +68,43 @@ function renderUI() {
     // Artist name
     const artistDiv = document.createElement('div');
     artistDiv.className = 'artist';
-    artistDiv.textContent = artistObj.artist + ' ▼';
-    topContainer.appendChild(artistDiv);
+    artistDiv.textContent = artistObj.artist;
 
+    // Dropdown arrow in a separate span
+    const arrowSpan = document.createElement('span');
+    arrowSpan.className = 'artist-arrow';
+    arrowSpan.textContent = ' ▼';
+    artistDiv.appendChild(arrowSpan);
+
+    topContainer.appendChild(artistDiv);
 
     // Right-click the artist name to show buttons
     artistDiv.addEventListener('contextmenu', function(e) {
       e.preventDefault();
-    // Hide all other containerBtn first
-    document.querySelectorAll('.containerBtn').forEach(btn => {
+      // Hide all other containerBtn first
+      document.querySelectorAll('.containerBtn').forEach(btn => {
       btn.style.display = 'none';
+      });
+      // Show this artist's buttons
+      containerBtn.style.display = 'block';
     });
-    // Show this artist's buttons
-    containerBtn.style.display = 'block';
-    });
-    
+
     // Double tap to show the artist name edit button
     artistDiv.addEventListener('touchstart', function (e) {
       const currentTime = new Date().getTime();
       const tapLength = currentTime - lastTap;
 
       if (tapLength < tapThreshold && tapLength > 0) {
-        e.preventDefault();
-        document.querySelectorAll('.containerBtn').forEach(btn => {
-          btn.style.display = 'none';
-        });
-        // Show this artist's buttons
-        containerBtn.style.display = 'block';
+      e.preventDefault();
+      document.querySelectorAll('.containerBtn').forEach(btn => {
+        btn.style.display = 'none';
+      });
+      // Show this artist's buttons
+      containerBtn.style.display = 'block';
       }
 
       lastTap = currentTime;
     });
-
-
 
     // Artist buttons
     const containerBtn = document.createElement('div');
@@ -110,38 +114,50 @@ function renderUI() {
     renameBtn.className = 'containerRenameBtn';
     renameBtn.textContent = 'Rename';
 
-
     // Rename artist button
     renameBtn.onclick = () => {
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.value = artistObj.artist;
-      input.className = 'artistInput';
-      artistDiv.replaceWith(input);
-      input.focus();
+      // Make artistDiv contenteditable, but not the arrowSpan
+      artistDiv.contentEditable = 'true';
+      arrowSpan.contentEditable = 'false';
+      artistDiv.focus();
 
-      // Mirror for width
-      const mirror = document.createElement('span');
-      mirror.className = 'artistInput-mirror';
-      document.body.appendChild(mirror);
-      function updateInputWidth() {
-        mirror.textContent = input.value || ' ';
-        input.style.width = (mirror.offsetWidth) + 'px';
+      // Move cursor to the end of the artist name (before the arrow)
+      const range = document.createRange();
+      const sel = window.getSelection();
+      range.setStart(artistDiv.firstChild, artistDiv.firstChild.length);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+
+      // Prevent editing the arrowSpan
+      function enforceNoArrowEdit() {
+      // Remove any accidental edits to the arrow
+      if (!artistDiv.textContent.endsWith(arrowSpan.textContent)) {
+        artistDiv.textContent = artistDiv.textContent.replace(arrowSpan.textContent, '');
+        artistDiv.appendChild(arrowSpan);
       }
-      updateInputWidth();
-      input.addEventListener('input', updateInputWidth);
-
-      function restore() {
-        appData[artistIdx].artist = input.value.trim() || 'Unknown';
-
-        saveData();
-        renderUI();
-        document.body.removeChild(mirror);
       }
-      input.addEventListener('keydown', e => {
-         if (e.key === 'Enter') restore();
-        });
-      input.addEventListener('blur', restore);
+
+      artistDiv.addEventListener('input', enforceNoArrowEdit);
+
+      function finishEdit() {
+      artistDiv.removeEventListener('input', enforceNoArrowEdit);
+      artistDiv.contentEditable = 'false';
+      // Save new name (without the arrow)
+      const newName = artistDiv.textContent.replace(arrowSpan.textContent, '').trim() || 'Unknown';
+      appData[artistIdx].artist = newName;
+      saveData();
+      renderUI();
+      }
+
+      artistDiv.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        finishEdit();
+      }
+      });
+
+      artistDiv.addEventListener('blur', finishEdit, { once: true });
     };
 
 
