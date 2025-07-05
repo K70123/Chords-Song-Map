@@ -389,7 +389,7 @@ button{
 
 .songMapContainer, .liveSongMapContainer {
     padding: 2px;
-    width: 110px;
+    width: 100px;
     height: 380px;
     right: 0;
     border: 0.2px 0.2px solid;
@@ -399,7 +399,7 @@ button{
     margin-bottom: 8px;
 }
 .songMapList {
-    font-size: 11.5px;
+    font-size: 12px;
     padding: 0;
     margin: 0;
     margin-bottom: 14px;
@@ -414,19 +414,19 @@ button{
 
 .keyContainer{
     margin-top: 7px;
-    grid-template-columns: 30px 30px 30px 30px 30px 30px 30px 30px 30px;
+    grid-template-columns: 30px 30px 30px 30px 30px 30px 30px 30px 34px;
 }
 .key{
-    font-size: 12px;
+    font-size: 13px;
     padding: 4px;
     margin: 0;
 }
 .numKey{
-    font-size: 10.5px;
+    font-size: 11px;
 }
 .rightContainer, .liveRightContainer {
     padding: 0;
-    font-size: 15px;
+    font-size: 17px;
 }
 .songSectionContainer {
     width: 100%;
@@ -434,7 +434,7 @@ button{
 .sectionTitle{
     margin-bottom: 4px;
     margin-left: 6px;
-    font-size: 15.5px;
+    font-size: 16px;
     margin-top: 6px;
 }
 .addChordSectionBtn {
@@ -443,9 +443,9 @@ button{
     height: 26px;
 }
 .addChordBtn, .deleteSectionBtn{
-    font-size: 17px;
-    width: 17px;
-    height: 17px;
+    font-size: 20px;
+    width: 26px;
+    height: 20px;
     border: 1px solid;
 }
 .deleteSectionBtn{
