@@ -857,6 +857,28 @@ function renderUI() {
       renderUI();
     }
   }
+  // Set the original key on hold tap
+  container.querySelector('.beatSpan').addEventListener('touchstart', function (e) {
+    // Start the timer
+    holdTimeout = setTimeout(() => {
+      e.preventDefault();
+      const newBeatSpan = prompt('Enter The New Beats Per Bar (Only 4 or 6):');
+      if (newBeatSpan !== "") {
+        currentSongObj.beatsPerBar = newBeatSpan;
+        saveData();
+        renderUI();
+      }
+    }, holdTapThreshold);
+  });
+  container.querySelector('.beatSpan').addEventListener('touchend', function () {
+    // Cancel if released early
+    clearTimeout(holdTimeout);
+  });
+
+  container.querySelector('.beatSpan').addEventListener('touchmove', function () {
+    // Cancel if they move finger
+    clearTimeout(holdTimeout);
+  });
 
 
 
@@ -1029,6 +1051,9 @@ function renderUI() {
       } 
       else if (beatsPerBar === 6) {
         chordsPerRow = 4;
+        if (window.innerWidth < 600) {
+          chordsPerRow = 3;
+        }
       }
 
       for (let i = 0; i < section.chords.length; i += chordsPerRow) {
@@ -1342,6 +1367,27 @@ function renderUI() {
           renderUI(); // Re-render to update UI (which will handle highlighting)
         }
       };
+      // Set the original key on hold tap
+      btn.addEventListener('touchstart', function (e) {
+        // Start the timer
+        holdTimeout = setTimeout(() => {
+          e.preventDefault();
+          if (currentSongObj && btn.textContent !== 'Num') {
+            currentSongObj.originalKey = btn.textContent; // Set per-song original key
+            saveData(); // Save to localStorage
+            renderUI(); // Re-render to update UI (which will handle highlighting)
+          }
+        }, holdTapThreshold);
+      });
+      btn.addEventListener('touchend', function () {
+        // Cancel if released early
+        clearTimeout(holdTimeout);
+      });
+
+      btn.addEventListener('touchmove', function () {
+        // Cancel if they move finger
+        clearTimeout(holdTimeout);
+      });
     });
   }
 
