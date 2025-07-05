@@ -356,13 +356,13 @@ button{
     margin: 0;
 }
 .leftContainer {
-    width: 120px;
+    width: 130px;
     left: 49px;
     padding-top: 16px;
     padding-inline: 8px;
 }
 .menu{
-    width: 20px;
+    width: 30px;
     height: 22px;
     padding-top: 0;
 }
@@ -373,7 +373,7 @@ button{
     width: 100px;
 }
 .liveTitle {
-    font-size: 21px;
+    font-size: 20px;
 }
 .artistName {
     font-size: 15px;
