@@ -113,10 +113,8 @@ function renderUI() {
     // Remove live songs from localStorage on right-click
     li.addEventListener('contextmenu', function(e) {
       e.preventDefault();
-      // Remove the song from the liveSongs array
-      liveSongs = liveSongs.filter(songName => {
-        return appData.some(artist => artist.songs.some(song => song.name === songName));
-      });
+      // Remove the right-clicked song from the liveSongs array
+      liveSongs = liveSongs.filter(name => name !== songName);
       localStorage.setItem(`liveSongs_${currentUser}`, JSON.stringify(liveSongs));
 
       // Remove this song from liveSongsData
@@ -125,6 +123,33 @@ function renderUI() {
       localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
       // Remove the song from the dropdown menu
       li.remove();
+    });
+
+    li.addEventListener('touchstart', function (e) {
+      // Start the timer
+      holdTimeout = setTimeout(() => {
+        e.preventDefault();
+        // Remove the right-clicked song from the liveSongs array
+        liveSongs = liveSongs.filter(name => name !== songName);
+        localStorage.setItem(`liveSongs_${currentUser}`, JSON.stringify(liveSongs));
+
+        // Remove this song from liveSongsData
+        let liveSongsData = JSON.parse(localStorage.getItem(`liveSongsData_${currentUser}`) || '{}');
+        delete liveSongsData[songName];
+        localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
+        // Remove the song from the dropdown menu
+        li.remove();
+      }, holdTapThreshold);
+    });
+
+    li.addEventListener('touchend', function () {
+      // Cancel if released early
+      clearTimeout(holdTimeout);
+    });
+
+    li.addEventListener('touchmove', function () {
+      // Cancel if they move finger
+      clearTimeout(holdTimeout);
     });
   });
   
@@ -138,7 +163,7 @@ function renderUI() {
     showAllLiveSongsAndSections();
   });
 
-  let holdTimeout = null
+  let holdTimeout = null;
   // Hold-Tap to display all live songs and set the title
   liveTitle.addEventListener('touchstart', function () {
     // Start the timer
@@ -844,7 +869,7 @@ function renderUI() {
   beatDisplay.innerHTML = `Beats Per Bar: <span class="beatSpan">${currentSongObj?.beatsPerBar || '4'}</span>`;
   beatDisplay.style.fontSize = '30px';
   if (window.innerWidth < 600) {
-    beatDisplay.style.fontSize = '12px';
+    beatDisplay.style.fontSize = '13px';
   }
   container.appendChild(beatDisplay);
 
