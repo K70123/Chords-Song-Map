@@ -566,7 +566,24 @@ function renderUI() {
           sectionTitle.textContent = section.section;
           sectionDiv.appendChild(sectionTitle);
           
-          const chordsPerRow = 6; // Change this number as you like
+          // Set chordsPerRow based on beats per bar
+          let beatsPerBar = 4;
+          if (songObj && songObj.beatsPerBar) {
+            beatsPerBar = parseInt(songObj.beatsPerBar, 10) || 4;
+          }
+          let chordsPerRow;
+          if (beatsPerBar === 4) {
+            chordsPerRow = 6;
+            if (window.innerWidth < 600) {
+              chordsPerRow = 4;
+            }
+          } 
+          else if (beatsPerBar === 6) {
+            chordsPerRow = 4;
+            if (window.innerWidth < 600) {
+              chordsPerRow = 3;
+            }
+          }
 
           const chords = document.createElement('div');
           chords.className = 'chords';
@@ -654,23 +671,26 @@ function renderUI() {
               addChordSectionBtn.className = 'addChordSectionBtn';
               addChordSectionBtn.textContent = '+';
 
-              addChordSectionBtn.addEventListener('click', function() {
+                addChordSectionBtn.addEventListener('click', function() {
                 if (!liveSongsData[songObj.name]) {
                   liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
                 }
                 if (!Array.isArray(liveSongsData[songObj.name].chords)) {
                   liveSongsData[songObj.name].chords = [];
-                 }
-                // Use beatsPerBar from the song object, default to 4
+                }
+                // Always use beatsPerBar from the original song object
                 let beatsPerBar = 4;
                 if (songObj && songObj.beatsPerBar) {
                   beatsPerBar = parseInt(songObj.beatsPerBar, 10) || 4;
                 }
                 const dots = Array(beatsPerBar).fill('•').join(' ');
                 liveSongsData[songObj.name].chords.push({ section: "New Section", chords: [dots] });
+                // Also update beatsPerBar in the live data to match the original
+                liveSongsData[songObj.name].beatsPerBar = beatsPerBar;
+                localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
                 localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
                 showAllLiveSongsAndSections();
-              });
+                });
 
               chordsContainer.appendChild(addChordSectionBtn);
              }
