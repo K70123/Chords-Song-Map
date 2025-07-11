@@ -580,5 +580,9 @@ function liveSection() {
 
 // --- Log Out ---
 function logOut() {
-  window.location.href = "index.html";
+  firebase.auth().signOut().then(() => {
+    window.location.href = "index.html";
+  }).catch((error) => {
+    alert("Error signing out: " + error.message);
+  });
 }
