@@ -5,6 +5,9 @@ body{
   background-color: white;
   margin-top: 55px;
 }
+body.loading {
+  visibility: hidden;
+}
 .dark-mode{
   background-color: black;
   color: white;
@@ -128,11 +131,6 @@ a{
   background: black;
   border-color: white;
 }
-.dark-mode input{
-  color: white;
-  background: black;
-  border-color: white;
-}
 
 .newSongBtn{
   border: 1px solid;
@@ -183,20 +181,6 @@ a{
 .containerBtn{
   display: none;
   padding-bottom: 5px;
-}
-.artistInput{
-  font-size: 30px;
-  border: none;
-  outline: none;
-  text-align: center;
-  display: block;
-}
-.artistInput-mirror {
-  position: absolute;
-  visibility: hidden;
-  height: 0;
-  overflow: hidden;
-  font-size: 30px;
 }
 
 @media only screen and (max-width: 600px) {
@@ -261,9 +245,6 @@ a {
 .containerDeleteBtn{
   font-size: 10px;
 }
-.artistInput{
-  font-size: 18px;
-}
 .container{
   padding-bottom: 50px; 
 }
@@ -273,6 +254,6 @@ a {
 }
 .editBtn button {
   font-size: 10px;
-  padding: 1px 3px;
+  padding: 1px 1px;
 }
 }

@@ -1,38 +1,38 @@
-document.querySelector('form').addEventListener('submit', function(e) {
+const firebaseConfig = {
+  apiKey: "AIzaSyDq2yjYSfyhiIbrviV0WhW-NKzdfk7ABrQ",
+  authDomain: "chords-and-song-maps.firebaseapp.com",
+  projectId: "chords-and-song-maps",
+  storageBucket: "chords-and-song-maps.appspot.com",
+  messagingSenderId: "364224410651",
+  appId: "1:364224410651:web:d26213bf0e0b536aae34be",
+  measurementId: "G-CQEJKPQX1C"
+};
+
+// Prevent double init
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
+}
+
+document.getElementById('loginForm').addEventListener('submit', function(e) {
   e.preventDefault();
-  const username = document.querySelector('input[name="uname"]').value.trim();
-  if (username) {
-    const users = JSON.parse(localStorage.getItem('users')) || {};
-    const password = document.querySelector('input[name="psw"]').value.trim();
-    const rememberMe = document.querySelector('input[name="remember"]').checked;
+  const email = document.querySelector('input[name="email"]').value;
+  const password = document.querySelector('input[name="psw"]').value;
+  const remember = document.querySelector('input[name="remember"]').checked;
 
-    // Hash the entered password before comparing
-    async function hashPassword(password) {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(password);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-    }
+  // Set persistence
+  const persistence = remember
+    ? firebase.auth.Auth.Persistence.LOCAL
+    : firebase.auth.Auth.Persistence.SESSION;
 
-    if (users[username]) {
-      hashPassword(password).then(hashedPassword => {
-        if (users[username] === hashedPassword) {
-          localStorage.setItem('currentUser', username);
-          if (rememberMe) {
-            localStorage.setItem('rememberMe', 'true');
-          } 
-          else {
-            localStorage.removeItem('rememberMe');
-          }
-          window.location.href = 'Home-index.html';
-        }
-        else {
-          alert('Incorrect password. Please try again.');
-        }
-      });
-    } 
-    else {
-      alert('Username does not exist. Please sign up first.');
-    }
-  }
+  firebase.auth().setPersistence(persistence)
+    .then(() => {
+      return firebase.auth().signInWithEmailAndPassword(email, password);
+    })
+    .then((userCredential) => {
+      // Signed in
+      window.location.href = 'Home-index.html';
+    })
+    .catch((error) => {
+      alert(error.message);
+    });
 });

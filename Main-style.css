@@ -181,7 +181,7 @@ body.dark-mode .addPartBtn{
     flex-direction: column;
     width: 100%;
     height: 100%;
-    padding: 20px;
+    padding: 10px;
     font-size: 40px;
 }
 .keyContainer{
@@ -349,6 +349,9 @@ ul {
 @media only screen and (max-width: 600px) {
 .title{
     font-size: 17px;
+}
+.liveRightContainer .title {
+  text-align: left !important;
 }
 
 button{

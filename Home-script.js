@@ -1,19 +1,138 @@
-// --- Data Model and Persistence ---
-const currentUser = localStorage.getItem('currentUser') || 'guest';
-let appData = JSON.parse(localStorage.getItem(`chordAppData_${currentUser}`));
-if (!Array.isArray(appData)) {
-  appData = [];
+const firebaseConfig = {
+  apiKey: "AIzaSyDq2yjYSfyhiIbrviV0WhW-NKzdfk7ABrQ",
+  authDomain: "chords-and-song-maps.firebaseapp.com",
+  projectId: "chords-and-song-maps",
+  storageBucket: "chords-and-song-maps.appspot.com",
+  messagingSenderId: "364224410651",
+  appId: "1:364224410651:web:d26213bf0e0b536aae34be",
+  measurementId: "G-CQEJKPQX1C"
+};
+
+// Prevent double init
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
 }
 
-function saveData() {
-  localStorage.setItem(`chordAppData_${currentUser}`, JSON.stringify(appData));
+let appData = []; // Initialize globally, will be populated by Firestore
+let currentUser = null; // Will store the user UID
+
+let liveSongs = [];
+let liveSongsData = {}; // Object to store live songs data
+
+// Get current user and load initial data
+firebase.auth().onAuthStateChanged(async (user) => {
+  if (!user) {
+    window.location.href = "index.html"; // Redirect to login if not authenticated
+    return;
+  }
+
+  currentUser = user.uid; // Set currentUser UID
+  console.log("Authenticated user:", currentUser);
+
+  try {
+    const doc = await firebase.firestore().collection('users').doc(currentUser).get();
+
+    // Dark mode loading
+    if (doc.exists) {
+      const userData = doc.data();
+      appData = userData.appData || []; // Load appData into your global variable
+      liveSongs = userData.liveSongs || []; // Load liveSongs into your global variable
+      liveSongsData = userData.liveSongsData || {};
+      const isDarkMode = userData.darkMode === true; // Load darkMode state
+
+      if (isDarkMode) {
+        document.body.classList.add('dark-mode');
+        // Update dark mode button icon/text immediately
+        const iconSpan = document.querySelector('#darkBtnIcon');
+        const textSpan = document.querySelector('#darkBtnSpan');
+        if (iconSpan && textSpan) {
+          iconSpan.textContent = '☼';
+          textSpan.textContent = 'Light Mode';
+          if (window.innerWidth < 600) {
+            iconSpan.style.height = '36px';
+            iconSpan.style.width = '95px';
+          } else {
+            iconSpan.style.height = '62px';
+            iconSpan.style.width = '64.5px';
+          }
+        }
+      } 
+      else {
+        document.body.classList.remove('dark-mode');
+        // Update dark mode button icon/text immediately
+        const iconSpan = document.querySelector('#darkBtnIcon');
+        const textSpan = document.querySelector('#darkBtnSpan');
+        if (iconSpan && textSpan) {
+          iconSpan.textContent = '☾⋆';
+          textSpan.textContent = 'Dark Mode';
+          if (window.innerWidth < 600) {
+            iconSpan.style.height = '42px';
+            iconSpan.style.width = '102px';
+          } else {
+            iconSpan.style.height = '70px';
+            iconSpan.style.width = '70px';
+          }
+        }
+      }
+    } 
+    else {
+      appData = []; // Default to empty array if no user data found
+      document.body.classList.remove('dark-mode'); // Default to light mode if no data
+    }
+
+    renderUI(); // Render UI after all data (appData and dark mode) is loaded
+    document.body.classList.remove('loading'); // Remove loading class to show content
+  } 
+  catch (error) {
+    console.error("Error loading user data from Firestore:", error);
+    // Potentially redirect to an error page or show a user-friendly message
+  }
+});
+
+// Save data to Firestore
+async function saveData() {
+  if (!currentUser) { // Ensure currentUser is available
+    console.error("User not logged in, cannot save data.");
+    return;
+  }
+  // Add a defensive check here to ensure appData is an array before saving
+  if (!Array.isArray(appData)) {
+      console.error("appData is not an array, cannot save:", appData);
+      appData = []; // Reset to empty array to prevent future errors
+  }
+  if (!Array.isArray(liveSongs)) { // <--- NEW: Defensive check for liveSongs
+      console.error("liveSongs is not an array, cannot save:", liveSongs);
+      liveSongs = [];
+  }
+
+  try {
+    await firebase.firestore().collection('users').doc(currentUser).set({
+      appData: appData, // THIS refers to the global `appData` variable
+      liveSongs: liveSongs,
+      liveSongsData: liveSongsData // Save liveSongsData object
+    }, { merge: true });
+  } 
+  catch (error) {
+    console.error("Error saving app data to Firestore:", error);
+  }
 }
 
-// Load or initialize liveSongsData
-let liveSongsData = JSON.parse(localStorage.getItem(`liveSongsData_${currentUser}`) || '{}');
 
-// Changing the title
-document.querySelector('#title').textContent = `🎵Welcome ${currentUser}🎵`;
+
+// --- Add New Artist Button ---
+document.getElementById('addArtistBtn').addEventListener('click', function() {
+  // Check if a user is logged in before proceeding
+  if (!firebase.auth().currentUser) { // Use firebase.auth().currentUser for this check
+    console.error("No user logged in to add artist.");
+    return;
+  }
+
+  // Add the new artist to the global appData array
+  appData.push({ artist: 'Unknown Artist', songs: [] });
+  saveData(); // Save the updated appData to Firestore
+  renderUI(); // Re-render the UI to display the new artist
+});
+
 
 // --- UI Rendering ---
 function renderUI() {
@@ -26,30 +145,6 @@ function renderUI() {
 
   let lastTap = 0;
   const tapThreshold = 300; // max ms between taps to count as double-tap
-
-
-  // Dark Mode
-  const isDarkMode = localStorage.getItem(`darkMode_${currentUser}`) === 'true';
-  const darkBtnSpan = document.querySelector('#darkBtnSpan');
-  const darkBtnIcon = document.querySelector('#darkBtnIcon');
-  if (darkBtnSpan && darkBtn) {
-    if (isDarkMode) {
-      document.body.classList.add('dark-mode');
-      darkBtnSpan.textContent = 'Light Mode';
-      darkBtnIcon.textContent = '☼';
-      darkBtnIcon.style.height = '62px';
-      darkBtnIcon.style.width = '64.5px';
-      if (window.innerWidth < 600) {
-        darkBtnIcon.style.height = '36px';
-        darkBtnIcon.style.width = '95px';
-      }
-    } 
-    else {
-    document.body.classList.remove('dark-mode');
-    darkBtnSpan.textContent = 'Dark Mode';
-    darkBtnIcon.textContent = '☾⋆';
-    }
-  }
 
 
   const container = document.querySelector('.container');
@@ -121,7 +216,6 @@ function renderUI() {
       arrowSpan.contentEditable = 'false';
       artistDiv.focus();
 
-      // Move cursor to the end of the artist name (before the arrow)
       const range = document.createRange();
       const sel = window.getSelection();
       range.setStart(artistDiv.firstChild, artistDiv.firstChild.length);
@@ -146,6 +240,7 @@ function renderUI() {
       // Save new name (without the arrow)
       const newName = artistDiv.textContent.replace(arrowSpan.textContent, '').trim() || 'Unknown';
       appData[artistIdx].artist = newName;
+
       saveData();
       renderUI();
       }
@@ -165,38 +260,22 @@ function renderUI() {
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'containerDeleteBtn';
     deleteBtn.textContent = 'Delete';
-    deleteBtn.onclick = () => {
+    deleteBtn.onclick = async() => {
       if (confirm('Delete this artist and all songs?\n(This action cannot be undone)')) {
         const artistSongs = appData[artistIdx].songs.map(song => song.name); // get song names
 
-        // Get current live songs
-        let liveSongsRaw = localStorage.getItem(`liveSongs_${currentUser}`);
-        let liveSongs = [];
-        if (liveSongsRaw && liveSongsRaw !== "undefined") {
-          liveSongs = JSON.parse(liveSongsRaw);
-          // Filter out songs that no longer exist in appData
-          liveSongs = liveSongs.filter(songName =>
-            appData.some(artist => artist.songs.some(song => song.name === songName))
-          );
-          // Save the filtered list back to localStorage if changed
-          localStorage.setItem(`liveSongs_${currentUser}`, JSON.stringify(liveSongs));
-        }
-
         // Remove from liveSongsData
         let liveSongsDataObj = {};
-        const liveSongsDataRaw = localStorage.getItem(`liveSongsData_${currentUser}`);
-        if (liveSongsDataRaw && liveSongsDataRaw !== "undefined") {
-          liveSongsDataObj = JSON.parse(liveSongsDataRaw);
+        if (liveSongsDataRaw !== "undefined") {
+          liveSongsDataObj = JSON.parse(liveSongsData);
         }
         // Remove from liveSongsData
         artistSongs.forEach(song => {
           delete liveSongsDataObj[song];
         });
-        localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsDataObj));
-
         
         appData.splice(artistIdx, 1);
-        saveData();
+        await saveData();
         renderUI();
       }
     };
@@ -303,41 +382,21 @@ function renderUI() {
       const deleteSongBtn = document.createElement('button');
       deleteSongBtn.className = 'deleteBtn';
       deleteSongBtn.textContent = '🗑️';
-      deleteSongBtn.onclick = () => {
-        if (confirm('Delete this song?\n (This action cannot be undone)')) {
-          // Store the song name before removing it from the array
-          const songName = song.name;
+      deleteSongBtn.onclick = async () => {
+        if (confirm('Delete this song?\n(This action cannot be undone)')) {
+          const songNameToDelete = song.name;
+
+          // Remove song from appData
           appData[artistIdx].songs.splice(songIdx, 1);
 
-          // Remove the song from live songs if it exists
-          let liveSongsRaw = localStorage.getItem(`liveSongs_${currentUser}`);
-          let liveSongs = [];
-          if (liveSongsRaw && liveSongsRaw !== "undefined") {
-            liveSongs = JSON.parse(liveSongsRaw);
-            // Filter out songs that no longer exist in appData
-            liveSongs = liveSongs.filter(songName =>
-              appData.some(artist => artist.songs.some(song => song.name === songName))
-          );
-          // Save the filtered list back to localStorage if changed
-          localStorage.setItem(`liveSongs_${currentUser}`, JSON.stringify(liveSongs));
-        }
+          delete liveSongsData[songNameToDelete];
 
-          // Also remove from liveSongsData
-          const liveSongsDataRaw = localStorage.getItem(`liveSongsData_${currentUser}`);
-          let liveSongsDataObj = {};
-          if (liveSongsDataRaw && liveSongsDataRaw !== "undefined") {
-            liveSongsDataObj = JSON.parse(liveSongsDataRaw);
-          }
-          delete liveSongsDataObj[songName];
-          localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsDataObj));
+          // Remove from liveSongs
+          liveSongs = liveSongs.filter(name => name !== songNameToDelete);
 
-
-          // Remember which dropdown should stay open
-          saveData();
-
-          // Store the index of the artist whose dropdown should be open
           localStorage.setItem(`openDropdownArtistIdx_${currentUser}`, artistIdx);
 
+          await saveData();
           renderUI();
         }
       };
@@ -346,34 +405,27 @@ function renderUI() {
       const addToLiveBtn = document.createElement('button');
       addToLiveBtn.className = 'addToLiveBtn';
       addToLiveBtn.textContent = '🔴';
-      addToLiveBtn.onclick = () => {
-        // Get current live songs from localStorage or start with an empty array
-        let liveSongsRaw = localStorage.getItem(`liveSongs_${currentUser}`);
-        let liveSongs = [];
-        if (liveSongsRaw && liveSongsRaw !== "undefined") {
-          liveSongs = JSON.parse(liveSongsRaw);
-          // Filter out songs that no longer exist in appData
-          liveSongs = liveSongs.filter(songName =>
-            appData.some(artist => artist.songs.some(song => song.name === songName))
-          );
-          // Save the filtered list back to localStorage if changed
-          localStorage.setItem(`liveSongs_${currentUser}`, JSON.stringify(liveSongs));
-        }
-        // Add the new song if not already in the list
+      // Add the new song if not already in the list
+      if (liveSongs.includes(song.name)) {
+        addToLiveBtn.textContent = '🟢'; // Use green circle for "active"
+      }
+      else {
+        addToLiveBtn.textContent = '🔴'; // Use red circle for "inactive"
+      }
+      addToLiveBtn.onclick = async () => {
         if (!liveSongs.includes(song.name)) {
-        liveSongs.push(song.name);
+          liveSongs.push(song.name);
+          addToLiveBtn.textContent = '🟢'; // Use green circle for "active"
         } 
-        // Save back to localStorage
-        localStorage.setItem(`liveSongs_${currentUser}`, JSON.stringify(liveSongs));
-
-        // Remember which dropdown should stay open
-        saveData();
+        else {
+          // Remove the song from liveSongs
+          liveSongs = liveSongs.filter(name => name !== song.name);
+          addToLiveBtn.textContent = '🔴'; // Use red circle for "inactive"
+        }
+        await saveData();
 
         // Store the index of the artist whose dropdown should be open
         localStorage.setItem(`openDropdownArtistIdx_${currentUser}`, artistIdx);
-
-        renderUI();
-
       }
 
       editBtn.appendChild(renameSongBtn);
@@ -473,20 +525,12 @@ document.addEventListener('click', function(e) {
 });
 
 
-// --- Add New Artist Button ---
-document.getElementById('addArtistBtn').addEventListener('click', function(){
-  appData.push({ artist: 'Unknown Artist', songs: [] });
-  saveData();
-  renderUI();
-});
-
-
 // --- Initial Render ---
 renderUI();
 
 
 // --- Dark Mode ---
-function darkMode(){
+async function darkMode(){
   document.body.classList.toggle('dark-mode');
   const isDarkMode = document.body.classList.contains('dark-mode');
   const iconSpan = document.querySelector('#darkBtnIcon');
@@ -511,14 +555,15 @@ function darkMode(){
         iconSpan.style.width = '102px';
       }
     }
-  localStorage.setItem(`darkMode_${currentUser}`, isDarkMode);
+    await firebase.firestore().collection('users').doc(user.uid).set({
+      darkMode: isDarkMode
+    }, { merge: true });
   }
 }
 
 
 // --- Go To Live Section ---
 function liveSection() {
-  // Count total number of songs
   const totalSongs = appData.reduce((sum, artist) => {
     return sum + (Array.isArray(artist.songs) ? artist.songs.length : 0);
   }, 0);
@@ -527,12 +572,13 @@ function liveSection() {
     window.location.href = "Main Page.html";
     localStorage.setItem(`liveSection_${currentUser}`, 'true');
   }
+  else {
+    alert("No songs made yet! Please add a song first.");
+  }
 }
 
 
 // --- Log Out ---
 function logOut() {
-  localStorage.removeItem('rememberMe');
-  localStorage.removeItem('currentUser');
   window.location.href = "index.html";
 }

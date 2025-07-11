@@ -1,23 +1,110 @@
-// --- Data Model and Persistence ---
-const currentUser = localStorage.getItem('currentUser') || 'guest';
-let appData = JSON.parse(localStorage.getItem(`chordAppData_${currentUser}`));
-if (!Array.isArray(appData)) {
-  appData = [];
+const firebaseConfig = {
+  apiKey: "AIzaSyDq2yjYSfyhiIbrviV0WhW-NKzdfk7ABrQ",
+  authDomain: "chords-and-song-maps.firebaseapp.com",
+  projectId: "chords-and-song-maps",
+  storageBucket: "chords-and-song-maps.appspot.com",
+  messagingSenderId: "364224410651",
+  appId: "1:364224410651:web:d26213bf0e0b536aae34be",
+  measurementId: "G-CQEJKPQX1C"
+};
+
+// Prevent double init
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
 }
 
-function saveData() {
-  localStorage.setItem(`chordAppData_${currentUser}`, JSON.stringify(appData));
+let appData = []; // Initialize globally, will be populated by Firestore
+let currentUser = null; // Will store the user UID
+
+let currentArtistIndex = -1;
+let currentSongIndex = -1;
+let currentSongData = null;
+
+let liveSongs = [];
+let liveSongsData = {};
+
+let beatsPerBar = 4;
+let chordsPerRow = 6;
+
+// --- Data Model and Persistence ---
+firebase.auth().onAuthStateChanged(async (user) => {
+  if (!user) {
+    window.location.href = "index.html"; // Redirect to login if not authenticated
+    return;
+  }
+
+  currentUser = user.uid; // Set currentUser UID
+  console.log("Authenticated user:", currentUser);
+
+  try {
+    const doc = await firebase.firestore().collection('users').doc(currentUser).get();
+
+    // Dark mode loading
+    if (doc.exists) {
+      const userData = doc.data();
+      appData = userData.appData || []; // Load appData into your global variable
+      liveSongs = userData.liveSongs || []; // Load liveSongs into your global variable
+      liveSongsData = userData.liveSongsData || {}; // Load liveSongsData into your global variable
+      const isDarkMode = userData.darkMode === true; // Load darkMode state
+
+      const darkBtn = document.querySelector('#darkBtn');
+
+      if (isDarkMode) {
+        document.body.classList.add('dark-mode');
+        darkBtn.textContent = '☼';
+      }
+      else {
+        document.body.classList.remove('dark-mode');
+        darkBtn.textContent = '☾⋆';
+      }
+    } 
+    else {
+      appData = []; // Default to empty array if no user data found
+      liveSongs = []; // Default to empty array if no live songs found
+      document.body.classList.remove('dark-mode'); // Default to light mode if no data
+    }
+
+    renderUI(); // Render UI after all data (appData and dark mode) is loaded
+    document.body.classList.remove('loading'); // Remove loading class to show content
+  } 
+  catch (error) {
+    console.error("Error loading user data from Firestore:", error);
+    // Potentially redirect to an error page or show a user-friendly message
+  }
+});
+
+
+// Save data to Firestore
+async function saveData() {
+  if (!currentUser) { // Ensure currentUser is available
+    console.error("User not logged in, cannot save data.");
+    return;
+  }
+  // Add a defensive check here to ensure appData is an array before saving
+  if (!Array.isArray(appData)) {
+      console.error("appData is not an array, cannot save:", appData);
+      appData = []; // Reset to empty array to prevent future errors
+  }
+
+  try {
+    await firebase.firestore().collection('users').doc(currentUser).set({
+      appData: appData, // THIS refers to the global `appData` variable
+      liveSongs: liveSongs,
+      liveSongsData: liveSongsData
+    }, { merge: true });  
+  } 
+  catch (error) {
+    console.error("Error saving app data to Firestore:", error);
+  }
 }
+
+
 window.keyList = [
   'A', 'A#', 'Bb', 'B', 'C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'Num'
 ];
 
 let nextChordFocus = null; // To track the next chord to focus after editing
 let nextSongMapFocusIdx = null; // To track the next song map part to focus after editing
-
-
-// Load or initialize liveSongsData
-let liveSongsData = JSON.parse(localStorage.getItem(`liveSongsData_${currentUser}`) || '{}');
 
 localStorage.setItem(`nashvilleMode_${currentUser}`, 'false');
 
@@ -39,20 +126,6 @@ function renderUI() {
     });
     menu.style.width = '20px';
     menu.style.height = '22px';
-  }
-
-  // Dark Mode
-  const isDarkMode = localStorage.getItem(`darkMode_${currentUser}`) === 'true';
-  const darkBtn = document.querySelector('#darkBtn');
-  if (darkBtn) {
-    if (isDarkMode) {
-      document.body.classList.add('dark-mode');
-      darkBtn.textContent = '☼';
-    } 
-    else {
-      document.body.classList.remove('dark-mode');
-      darkBtn.textContent = '☾⋆';
-    }
   }
 
   // Left Container
@@ -80,18 +153,6 @@ function renderUI() {
   }
   dropdownMenu.innerHTML = ''; // Clear previous content
 
-  // Get live songs from localStorage
-  let liveSongsRaw = localStorage.getItem(`liveSongs_${currentUser}`);
-  let liveSongs = [];
-  if (liveSongsRaw && liveSongsRaw !== "undefined") {
-    liveSongs = JSON.parse(liveSongsRaw);
-    // Filter out songs that no longer exist in appData
-    liveSongs = liveSongs.filter(songName =>
-      appData.some(artist => artist.songs.some(song => song.name === songName))
-    );
-    // Save the filtered list back to localStorage if changed
-    localStorage.setItem(`liveSongs_${currentUser}`, JSON.stringify(liveSongs));
-  }
   liveSongs.forEach(songName => {
     const li = document.createElement('li');
     li.className = 'songName';
@@ -111,35 +172,31 @@ function renderUI() {
     });
 
     // Remove live songs from localStorage on right-click
-    li.addEventListener('contextmenu', function(e) {
+    li.addEventListener('contextmenu', async function(e) {
       e.preventDefault();
       // Remove the right-clicked song from the liveSongs array
       liveSongs = liveSongs.filter(name => name !== songName);
-      localStorage.setItem(`liveSongs_${currentUser}`, JSON.stringify(liveSongs));
 
       // Remove this song from liveSongsData
-      let liveSongsData = JSON.parse(localStorage.getItem(`liveSongsData_${currentUser}`) || '{}');
       delete liveSongsData[songName];
-      localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
       // Remove the song from the dropdown menu
       li.remove();
+      await saveData(); // Save the updated liveSongs and liveSongsData
     });
 
-    li.addEventListener('touchstart', function (e) {
+    li.addEventListener('touchstart', async function (e) {
       // Start the timer
       holdTimeout = setTimeout(() => {
         e.preventDefault();
         // Remove the right-clicked song from the liveSongs array
         liveSongs = liveSongs.filter(name => name !== songName);
-        localStorage.setItem(`liveSongs_${currentUser}`, JSON.stringify(liveSongs));
 
         // Remove this song from liveSongsData
-        let liveSongsData = JSON.parse(localStorage.getItem(`liveSongsData_${currentUser}`) || '{}');
         delete liveSongsData[songName];
-        localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
         // Remove the song from the dropdown menu
         li.remove();
       }, holdTapThreshold);
+      await saveData(); // Save the updated liveSongs and liveSongsData
     });
 
     li.addEventListener('touchend', function () {
@@ -152,7 +209,6 @@ function renderUI() {
       clearTimeout(holdTimeout);
     });
   });
-  
 
   let title = document.querySelector('.title');
 
@@ -170,6 +226,7 @@ function renderUI() {
     holdTimeout = setTimeout(() => {
       // If the user holds long enough, do this:
       localStorage.setItem(`openMapForSong_${currentUser}`, null);
+      document.querySelector('.title').style.display = 'none';
       showAllLiveSongsAndSections();
     }, holdTapThreshold);
   });
@@ -194,7 +251,7 @@ function renderUI() {
     rightContainer.appendChild(liveRightContainer);
 
     const songMapContainer = document.querySelector('.songMapContainer');
-    if (songMapContainer.style.display = 'block'){
+    if (songMapContainer.style.display === 'block'){
       songMapContainer.style.display = 'none';
     }
 
@@ -208,19 +265,6 @@ function renderUI() {
     songMapTitle.className = 'songMapTitle';
     songMapTitle.textContent = 'Song Map';
     liveSongMapContainer.appendChild(songMapTitle);
-
-    // Get live songs from localStorage
-    let liveSongsRaw = localStorage.getItem(`liveSongs_${currentUser}`);
-    let liveSongs = [];
-    if (liveSongsRaw && liveSongsRaw !== "undefined") {
-      liveSongs = JSON.parse(liveSongsRaw);
-      // Filter out songs that no longer exist in appData
-      liveSongs = liveSongs.filter(songName =>
-        appData.some(artist => artist.songs.some(song => song.name === songName))
-      );
-      // Save the filtered list back to localStorage if changed
-      localStorage.setItem(`liveSongs_${currentUser}`, JSON.stringify(liveSongs));
-    }
    
 
   // Find and render each live song
@@ -241,11 +285,38 @@ function renderUI() {
           : [];
         }
         liveSongsData[songName] = songObj; // Save the copy for future edits
-        localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
       }
       break;
     }
-    if (!songObj) return; 
+    if (!songObj){
+      console.warn(`Live song "${songName}" not found in appData. It might have been deleted.`);
+      return;
+    }
+    // --- Restore focus on nextChord or nextSongMapPart in live view ---
+    setTimeout(() => {
+      if (nextChordFocus) {
+        const section = document.querySelectorAll('.songSectionContainer')[nextChordFocus.sectionIdx];
+        if (section) {
+          const chord = section.querySelectorAll('.chord')[nextChordFocus.chordIdx];
+          if (chord) {
+            chord.contentEditable = true;
+            chord.focus();
+            document.execCommand('selectAll', false, null);
+          }
+        }
+        nextChordFocus = null;
+      }
+
+      if (nextSongMapFocusIdx !== null) {
+        const part = document.querySelectorAll('.songMapPart')[nextSongMapFocusIdx];
+        if (part) {
+          part.contentEditable = true;
+          part.focus();
+          document.execCommand('selectAll', false, null);
+        }
+        nextSongMapFocusIdx = null;
+      }
+    }, 0);  
     if (songObj) {
       // Show Song Map
       function showSongMap(songObj, songMapList, changeSongMapBtn, addPartBtn, e) {
@@ -283,15 +354,15 @@ function renderUI() {
         if (addPartBtn) { 
           const newAddPartBtn = addPartBtn.cloneNode(true);
           addPartBtn.replaceWith(newAddPartBtn);
-          newAddPartBtn.addEventListener('click', function() {
+          newAddPartBtn.addEventListener('click', async function() {
             if (songObj) {
               if (!Array.isArray(songObj.songMap)) {
                 songObj.songMap = [];
               }
               songObj.songMap.push("Unknown");
-              localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
               // Remebers which song map list to open
               localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+              await saveData(); // Save the updated liveSongsData
               showAllLiveSongsAndSections();
             }
           });
@@ -324,17 +395,21 @@ function renderUI() {
             lastTap = currentTime;
           });
 
-          part.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              const allParts = Array.from(songMapList.querySelectorAll('.songMapPart'));
-              const idx = allParts.indexOf(part);
-              nextSongMapFocusIdx = allParts[idx + 1] ? idx + 1 : null;
-              part.blur();
-            }
-          });
+            part.addEventListener('keydown', function(e) {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                const allParts = Array.from(document.querySelectorAll('.songMapPart'));
+                const idx = allParts.indexOf(part);
+                if (idx !== -1 && idx + 1 < allParts.length) {
+                  nextSongMapFocusIdx = idx + 1;
+                } else {
+                  nextSongMapFocusIdx = null;
+                }
+                setTimeout(() => part.blur(), 0);
+              }
+            });
 
-          part.addEventListener('blur', function () {
+          part.addEventListener('blur', async function () {
             part.contentEditable = false;
             const allParts = Array.from(songMapList.querySelectorAll('.songMapPart'));
             const idx = allParts.indexOf(part);
@@ -344,8 +419,8 @@ function renderUI() {
                 songObj.songMap.splice(idx, 1);
                 part.remove(); // Remove the empty part from the DOM
               }
-              localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
               localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+              await saveData(); // Save the updated liveSongsData
               showAllLiveSongsAndSections();
             }
           });
@@ -362,7 +437,7 @@ function renderUI() {
           part.classList.add('dragging');
           window.draggedPart = part;
         });
-        part.addEventListener('dragend', function() {
+        part.addEventListener('dragend', async function() {
           part.classList.remove('dragging');
           window.draggedPart = null;
           const reorderedParts = Array.from(songMapList.querySelectorAll('.songMapPart'))
@@ -371,7 +446,7 @@ function renderUI() {
           songObj.songMap = reorderedParts;
 
           liveSongsData[songObj.name] = songObj;
-          localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
+          await saveData(); // Save the updated liveSongsData
         });
 
         // --- Mobile: touch-based drag ---
@@ -434,13 +509,13 @@ function renderUI() {
       }
 
       // --- Save the new order ---
-      function saveSongMapOrder() {
+      async function saveSongMapOrder() {
         const reorderedParts = Array.from(songMapList.querySelectorAll('.songMapPart'))
           .map(p => p.textContent.trim());
 
           songObj.songMap = reorderedParts;
           liveSongsData[songObj.name] = songObj;
-          localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
+          await saveData(); // Save the updated liveSongsData
       }
     }
         
@@ -448,6 +523,10 @@ function renderUI() {
       // Container for song title and changeSongMapBtn
       const topContainer = document.createElement('div');
       topContainer.className = 'topContainer';
+      if (window.innerWidth < 600) {
+        topContainer.style.justifyContent = 'left';
+        topContainer.style.paddingLeft = '40px';
+      }
       liveRightContainer.appendChild(topContainer);
 
       // Song title
@@ -466,6 +545,9 @@ function renderUI() {
         // Warning (or whatever you want to call it)
         const warning = document.createElement('div');
         warning.style.fontSize = '30px';
+        if (window.innerWidth < 600) {
+          warning.style.fontSize = '13px';
+        }
         warning.className = 'warning'
         warning.textContent = 'No Song Map Displayed'
         liveSongMapContainer.appendChild(warning);
@@ -510,6 +592,94 @@ function renderUI() {
       chordsContainer.appendChild(originalKeySpan);
 
 
+      // Beats per bar
+      const beatDisplay = document.createElement('span');
+      beatDisplay.innerHTML = `Beats Per Bar: <span class="beatSpan">${songObj?.beatsPerBar || '4'}</span>`;
+      beatDisplay.style.fontSize = '30px';
+      if (window.innerWidth < 600) {
+        beatDisplay.style.fontSize = '13px';
+      }
+      chordsContainer.appendChild(beatDisplay);
+
+      // Add the chordsperrow span
+      const chordsPerRowSpan = document.createElement('span');
+      chordsPerRowSpan.innerHTML = `Chords Per Row: <span class="chordsPerRow">${songObj?.chordsPerRow || '4'}</span>`;
+      chordsPerRowSpan.style.fontSize = '30px';
+      if (window.innerWidth < 600) {
+        chordsPerRowSpan.style.fontSize = '13px';
+      }
+      chordsContainer.appendChild(chordsPerRowSpan);
+
+      chordsContainer.querySelector('.beatSpan').ondblclick = function(e) {
+        e.preventDefault();
+        const newBeatSpan = prompt('Enter The New Beats Per Bar:');
+        if (newBeatSpan !== "") {
+          songObj.beatsPerBar = newBeatSpan;
+          saveData();
+          showAllLiveSongsAndSections();
+        }
+      }
+      // Set the original key on hold tap
+      chordsContainer.querySelector('.beatSpan').addEventListener('touchstart', function (e) {
+        // Start the timer
+        holdTimeout = setTimeout(() => {
+          e.preventDefault();
+          const newBeatSpan = prompt('Enter The New Beats Per Bar');
+          if (newBeatSpan !== "") {
+            songObj.beatsPerBar = newBeatSpan;
+            saveData();
+            showAllLiveSongsAndSections();
+          }
+        }, holdTapThreshold);
+      });
+      chordsContainer.querySelector('.beatSpan').addEventListener('touchend', function () {
+        // Cancel if released early
+        clearTimeout(holdTimeout);
+      });
+
+      chordsContainer.querySelector('.beatSpan').addEventListener('touchmove', function () {
+        // Cancel if they move finger
+        clearTimeout(holdTimeout);
+      });
+
+
+      // --- Handle Chords Per Row Editing ---
+      function editChordsPerRowPrompt() {
+        const newChordsPerRow = prompt('Enter the number of chords per row (1–10):');
+        const value = parseInt(newChordsPerRow, 10);
+        if (!isNaN(value) && value > 0 && value <= 10) {
+          songObj.chordsPerRow = value;
+          saveData().then(showAllLiveSongsAndSections());
+        } 
+        else if (newChordsPerRow !== null) {
+          alert("Please enter a valid number between 1 and 10.");
+        }
+      }
+
+
+      chordsContainer.querySelector('.chordsPerRow').ondblclick = async function(e) {
+        e.preventDefault();
+        editChordsPerRowPrompt();
+      }
+      // Set the original key on hold tap
+      chordsContainer.querySelector('.chordsPerRow').addEventListener('touchstart', async function (e) {
+        // Start the timer
+        holdTimeout = setTimeout(() => {
+          e.preventDefault();
+          editChordsPerRowPrompt();
+        }, holdTapThreshold);
+      });
+      chordsContainer.querySelector('.chordsPerRow').addEventListener('touchend', function () {
+        // Cancel if released early
+        clearTimeout(holdTimeout);
+      });
+
+      chordsContainer.querySelector('.chordsPerRow').addEventListener('touchmove', function () {
+        // Cancel if they move finger
+        clearTimeout(holdTimeout);
+      });
+
+
       // Key Container
       if (Array.isArray(window.keyList)) {
         const keyContainer = document.createElement('div');
@@ -528,7 +698,7 @@ function renderUI() {
           else if (key === 'Num' && localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true'){
             keyBtn.classList.add('selectedNumKey');
           }
-          keyBtn.addEventListener('click', function() {
+          keyBtn.addEventListener('click', async function() {
             if (songObj) {
               // Always operate on the liveSongsData copy
               if (!liveSongsData[songObj.name]) {
@@ -543,8 +713,8 @@ function renderUI() {
               }
               else {
                 liveSongsData[songObj.name].currentKey = key; // Store the selected key in live data
-                localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData)); // Persist the change
                 localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+                await saveData(); // Save the updated liveSongsData
                 showAllLiveSongsAndSections();
               }
             }
@@ -565,29 +735,11 @@ function renderUI() {
           sectionTitle.className = 'sectionTitle';
           sectionTitle.textContent = section.section;
           sectionDiv.appendChild(sectionTitle);
-          
-          // Set chordsPerRow based on beats per bar
-          let beatsPerBar = 4;
-          if (songObj && songObj.beatsPerBar) {
-            beatsPerBar = parseInt(songObj.beatsPerBar, 10) || 4;
-          }
-          let chordsPerRow;
-          if (beatsPerBar === 4) {
-            chordsPerRow = 6;
-            if (window.innerWidth < 600) {
-              chordsPerRow = 4;
-            }
-          } 
-          else if (beatsPerBar === 6) {
-            chordsPerRow = 4;
-            if (window.innerWidth < 600) {
-              chordsPerRow = 3;
-            }
-          }
 
           const chords = document.createElement('div');
           chords.className = 'chords';
 
+          chordsPerRow = songObj.chordsPerRow || 4;
           for (let i = 0; i < section.chords.length; i += chordsPerRow) {
             const rowDiv = document.createElement('div');
             rowDiv.className = 'chord-row';
@@ -626,16 +778,16 @@ function renderUI() {
             const addChordBtn = document.createElement('button');
             addChordBtn.className = 'addChordBtn';
             addChordBtn.textContent = '+';
-            addChordBtn.addEventListener('click', function() {
+            addChordBtn.addEventListener('click', async function() {
               if (!liveSongsData[songObj.name]) {
                 liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
               }
               liveSongsData[songObj.name].chords[sectionIdx].chords.push("• • • •");
-              localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
               if (!liveSongsData[songObj.name]) {
                 liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
               }
               localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+              await saveData(); // Save the updated liveSongsData
               showAllLiveSongsAndSections();
             });
 
@@ -643,7 +795,7 @@ function renderUI() {
             const deleteSectionBtn = document.createElement('button');
             deleteSectionBtn.className = 'deleteSectionBtn';
             deleteSectionBtn.textContent = '🗑️';
-            deleteSectionBtn.addEventListener('click', function() {
+            deleteSectionBtn.addEventListener('click', async function() {
               // Ensure liveSongsData for this song exists, or create it as a copy of the original
               if (!liveSongsData[songObj.name]) {
                 liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
@@ -652,8 +804,8 @@ function renderUI() {
               liveSongsData[songObj.name].chords.splice(sectionIdx, 1);
 
               // Save changes to localStorage if needed
-              localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
               localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+              await saveData(); // Save the updated liveSongsData
               showAllLiveSongsAndSections();
             });
       
@@ -671,7 +823,7 @@ function renderUI() {
               addChordSectionBtn.className = 'addChordSectionBtn';
               addChordSectionBtn.textContent = '+';
 
-                addChordSectionBtn.addEventListener('click', function() {
+                addChordSectionBtn.addEventListener('click', async function() {
                 if (!liveSongsData[songObj.name]) {
                   liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
                 }
@@ -679,7 +831,6 @@ function renderUI() {
                   liveSongsData[songObj.name].chords = [];
                 }
                 // Always use beatsPerBar from the original song object
-                let beatsPerBar = 4;
                 if (songObj && songObj.beatsPerBar) {
                   beatsPerBar = parseInt(songObj.beatsPerBar, 10) || 4;
                 }
@@ -687,132 +838,105 @@ function renderUI() {
                 liveSongsData[songObj.name].chords.push({ section: "New Section", chords: [dots] });
                 // Also update beatsPerBar in the live data to match the original
                 liveSongsData[songObj.name].beatsPerBar = beatsPerBar;
-                localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
                 localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+                await saveData(); // Save the updated liveSongsData
                 showAllLiveSongsAndSections();
                 });
 
               chordsContainer.appendChild(addChordSectionBtn);
              }
 
+            function attachChordSpanListeners(chordSpan, sectionDiv, sectionIdx, chordsContainer, songObj) {
+              chordSpan.addEventListener('dblclick', (e) => {
+                e.preventDefault();
+                chordSpan.contentEditable = true;
+                chordSpan.focus();
+                document.execCommand('selectAll', false, null);
+              });
+
+              chordSpan.addEventListener('touchend', () => {
+                const currentTime = Date.now();
+                const tapLength = currentTime - lastTap;
+                if (tapLength < dblTapThreshold && tapLength > 0) {
+                  chordSpan.contentEditable = true;
+                  chordSpan.focus();
+                  document.execCommand('selectAll', false, null);
+                }
+                lastTap = currentTime;
+              });
+
+              chordSpan.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  const allSections = Array.from(chordsContainer.querySelectorAll('.songSectionContainer'));
+                  const allChords = Array.from(sectionDiv.querySelectorAll('.chord'));
+                  const chordIdx = allChords.indexOf(chordSpan);
+
+                  // Set focus target for next
+                  if (chordIdx < allChords.length - 1) {
+                    nextChordFocus = { sectionIdx, chordIdx: chordIdx + 1 };
+                  } else if (sectionIdx < allSections.length - 1) {
+                    nextChordFocus = { sectionIdx: sectionIdx + 1, chordIdx: 0 };
+                  } else {
+                    nextChordFocus = null;
+                  }
+                  setTimeout(() => chordSpan.blur(), 0);
+                }
+              });
+
+              chordSpan.addEventListener('blur', async () => {
+                chordSpan.contentEditable = false;
+                const allChords = Array.from(sectionDiv.querySelectorAll('.chord'));
+                const chordIdx = allChords.indexOf(chordSpan);
+                const text = chordSpan.textContent.trim();
+
+                if (!liveSongsData[songObj.name]) {
+                  liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
+                }
+
+                if (text === '') {
+                  liveSongsData[songObj.name].chords[sectionIdx].chords.splice(chordIdx, 1);
+
+                  const line = chordSpan.previousElementSibling;
+                  if (line && line.classList.contains('line')) line.remove();
+                  chordSpan.remove();
+
+                  if (liveSongsData[songObj.name].chords[sectionIdx].chords.length === 0) {
+                    liveSongsData[songObj.name].chords.splice(sectionIdx, 1);
+                  }
+                }
+                else {
+                  const originalKey = songObj.originalKey || 'C';
+                  const selectedKey = songObj.currentKey || originalKey;
+                  const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
+
+                  let finalChord;
+
+                  // Handle Nashville numbers
+                  const numberRegex = /^([1-7])([b#]?)(.*)$/;
+                  if (numberRegex.test(text) && !nashvilleMode) {
+                    // Convert Nashville number to actual chord
+                    const [ , number, accidental, suffix ] = text.match(numberRegex);
+                    const interpreted = transposeChord(number + accidental + suffix, 'C', selectedKey); // 'C' as root of Nashville
+                    finalChord = transposeChord(interpreted, selectedKey, originalKey);
+                  } else {
+                    // Convert regular chord from display key to original key
+                    finalChord = transposeChord(text, selectedKey, originalKey);
+                  }
+
+                  // Update chord in data
+                  liveSongsData[songObj.name].chords[sectionIdx].chords[chordIdx] = finalChord;
+                }
+                localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+                await saveData(); // Save the updated liveSongsData
+                showAllLiveSongsAndSections();
+              });
+            }
 
             // Double click to edit chords
             const chordSpans = sectionDiv.querySelectorAll('.chord');
             chordSpans.forEach(chordSpan => {
-              chordSpan.addEventListener('dblclick', function(e) {
-                e.preventDefault();
-                chordSpan.contentEditable = true;
-                chordSpan.focus();
-
-                chordSpan.addEventListener('keydown', function(e){
-                  if (e.key === 'Enter'){
-                    e.preventDefault();
-                    chordSpan.blur();
-                  }
-                });
-                // Set the chordSpan to be uneditable
-                chordSpan.addEventListener('blur', function() {
-                  chordSpan.contentEditable = false;
-                  const allSections = Array.from(chordsContainer.querySelectorAll('.songSectionContainer'));
-                  const sectionIdx = allSections.indexOf(sectionDiv);
-                  const chordIdx = Array.from(sectionDiv.querySelectorAll('.chord')).indexOf(chordSpan);
-
-                  if (!liveSongsData[songObj.name]) {
-                    liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
-                  }
-                  
-                  // If the chordSpan is empty, remove it
-                  if (chordSpan.textContent.trim() === '') {
-                    if (liveSongsData[songObj.name] && liveSongsData[songObj.name].chords[sectionIdx] && liveSongsData[songObj.name].chords[sectionIdx].chords) {
-                      liveSongsData[songObj.name].chords[sectionIdx].chords.splice(chordIdx, 1);
-                      // Remove the section if no chords left
-                      if (liveSongsData[songObj.name].chords[sectionIdx].chords.length === 0) {
-                        liveSongsData[songObj.name].chords.splice(sectionIdx, 1);
-                      }
-                      // Remove the line before the chord, if it exists and is a line
-                      let line = chordSpan.previousElementSibling;
-                      if (line && line.classList.contains('line')) {
-                        line.remove();
-                      } 
-                      else {
-                        // If not found, try the next sibling (for first chord in row)
-                        line = chordSpan.nextElementSibling;
-                        if (line && line.classList.contains('line')) {
-                          line.remove();
-                        }
-                      }
-                      chordSpan.remove(); // Also remove the chord span itself from DOM
-                      localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
-                    }
-                    localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
-                  }
-                  else {
-                    // Just update the chord text in data
-                    liveSongsData[songObj.name].chords[sectionIdx].chords[chordIdx] = chordSpan.textContent.trim();
-                    localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
-                  }
-                });
-              });
-              // Double tap to edit chord
-              chordSpan.addEventListener('touchend', function () {
-                const currentTime = new Date().getTime();
-                const tapLength = currentTime - lastTap;
-
-                if (tapLength < dblTapThreshold && tapLength > 0) {
-                  chordSpan.contentEditable = true;
-                  chordSpan.focus();
-                }
-                lastTap = currentTime;
-
-                chordSpan.addEventListener('keydown', function(e){
-                  if (e.key === 'Enter'){
-                    e.preventDefault();
-                    chordSpan.blur();
-                  }
-                });
-                // Set the chordSpan to be uneditable
-                chordSpan.addEventListener('blur', function() {
-                  chordSpan.contentEditable = false;
-                  const allSections = Array.from(chordsContainer.querySelectorAll('.songSectionContainer'));
-                  const sectionIdx = allSections.indexOf(sectionDiv);
-                  const chordIdx = Array.from(sectionDiv.querySelectorAll('.chord')).indexOf(chordSpan);
-
-                  if (!liveSongsData[songObj.name]) {
-                    liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
-                  }
-                  
-                  // If the chordSpan is empty, remove it
-                  if (chordSpan.textContent.trim() === '') {
-                    if (liveSongsData[songObj.name] && liveSongsData[songObj.name].chords[sectionIdx] && liveSongsData[songObj.name].chords[sectionIdx].chords) {
-                      liveSongsData[songObj.name].chords[sectionIdx].chords.splice(chordIdx, 1);
-                      // Remove the section if no chords left
-                      if (liveSongsData[songObj.name].chords[sectionIdx].chords.length === 0) {
-                        liveSongsData[songObj.name].chords.splice(sectionIdx, 1);
-                      }
-                      // Remove the line before the chord, if it exists and is a line
-                      let line = chordSpan.previousElementSibling;
-                      if (line && line.classList.contains('line')) {
-                        line.remove();
-                      } 
-                      else {
-                        // If not found, try the next sibling (for first chord in row)
-                        line = chordSpan.nextElementSibling;
-                        if (line && line.classList.contains('line')) {
-                          line.remove();
-                        }
-                      }
-                      chordSpan.remove(); // Also remove the chord span itself from DOM
-                      localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
-                    }
-                    localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
-                  }
-                  else {
-                    // Just update the chord text in data
-                    liveSongsData[songObj.name].chords[sectionIdx].chords[chordIdx] = chordSpan.textContent.trim();
-                    localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
-                  }
-                });
-              });
+              attachChordSpanListeners(chordSpan, sectionDiv, sectionIdx, chordsContainer, songObj);
             });
 
             // Rename Chord Section (attach only once per section)
@@ -825,7 +949,7 @@ function renderUI() {
                   sectionTitle.blur();
                 }
               });
-              sectionTitle.addEventListener('blur', function() {
+              sectionTitle.addEventListener('blur', async function() {
                 sectionTitle.contentEditable = false;
                 newSectionName = sectionTitle.textContent;
                 if (newSectionName !== null && newSectionName.trim() !== "") {
@@ -834,7 +958,7 @@ function renderUI() {
                   const idx = allSectionTitles.indexOf(sectionTitle);
                   if (idx !== -1 && liveSongsData[songObj.name] && liveSongsData[songObj.name].chords[idx]) {
                     liveSongsData[songObj.name].chords[idx].section = newSectionName;
-                    localStorage.setItem(`liveSongsData_${currentUser}`, JSON.stringify(liveSongsData));
+                    await saveData(); // Save the updated liveSongsData
                   }
                 }
               });
@@ -893,9 +1017,18 @@ function renderUI() {
   }
   container.appendChild(beatDisplay);
 
+  // Add the chordsperrow span
+  const chordsPerRowSpan = document.createElement('span');
+  chordsPerRowSpan.innerHTML = `Chords Per Row: <span class="chordsPerRow">${currentSongObj?.chordsPerRow || '4'}</span>`;
+  chordsPerRowSpan.style.fontSize = '30px';
+  if (window.innerWidth < 600) {
+    chordsPerRowSpan.style.fontSize = '13px';
+  }
+  container.appendChild(chordsPerRowSpan);
+
   container.querySelector('.beatSpan').ondblclick = function(e) {
     e.preventDefault();
-    const newBeatSpan = prompt('Enter The New Beats Per Bar (Only 4 or 6):');
+    const newBeatSpan = prompt('Enter The New Beats Per Bar:');
     if (newBeatSpan !== "") {
       currentSongObj.beatsPerBar = newBeatSpan;
       saveData();
@@ -907,7 +1040,7 @@ function renderUI() {
     // Start the timer
     holdTimeout = setTimeout(() => {
       e.preventDefault();
-      const newBeatSpan = prompt('Enter The New Beats Per Bar (Only 4 or 6):');
+      const newBeatSpan = prompt('Enter The New Beats Per Bar');
       if (newBeatSpan !== "") {
         currentSongObj.beatsPerBar = newBeatSpan;
         saveData();
@@ -925,6 +1058,42 @@ function renderUI() {
     clearTimeout(holdTimeout);
   });
 
+
+  // --- Handle Chords Per Row Editing ---
+  function editChordsPerRowPrompt() {
+    const newChordsPerRow = prompt('Enter the number of chords per row (1–10):');
+    const value = parseInt(newChordsPerRow, 10);
+    if (!isNaN(value) && value > 0 && value <= 10) {
+      currentSongObj.chordsPerRow = value;
+      saveData().then(renderUI);
+    } 
+    else if (newChordsPerRow !== null) {
+      alert("Please enter a valid number between 1 and 10.");
+    }
+  }
+
+
+  container.querySelector('.chordsPerRow').ondblclick = async function(e) {
+    e.preventDefault();
+    editChordsPerRowPrompt();
+  }
+  // Set the original key on hold tap
+  container.querySelector('.chordsPerRow').addEventListener('touchstart', async function (e) {
+    // Start the timer
+    holdTimeout = setTimeout(() => {
+      e.preventDefault();
+      editChordsPerRowPrompt();
+    }, holdTapThreshold);
+  });
+  container.querySelector('.chordsPerRow').addEventListener('touchend', function () {
+    // Cancel if released early
+    clearTimeout(holdTimeout);
+  });
+
+  container.querySelector('.chordsPerRow').addEventListener('touchmove', function () {
+    // Cancel if they move finger
+    clearTimeout(holdTimeout);
+  });
 
 
   // Change the chords when you click a selected key
@@ -948,7 +1117,6 @@ function renderUI() {
       keyBtn.addEventListener('click', function() {
         if (currentSongObj) {
           if (keyBtn.textContent === 'Num'){
-            // Add Nashville toggle button
             const current = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
             localStorage.setItem(`nashvilleMode_${currentUser}`, (!current).toString());
             renderUI();
@@ -966,73 +1134,105 @@ function renderUI() {
     const rightContainer = document.querySelector('.rightContainer');
     rightContainer.insertBefore(keyContainer, container); // Insert above chordsContainer
   }
-
-  // Transpose the chords according to the selected key
-  const originalKey = currentSongObj.originalKey || "C";
-  const selectedKey = currentSongObj.currentKey || originalKey;
   
   function transposeChord(chord, fromKey, toKey) {
-    // If Nashville mode is enabled, return Nashville number instead of chord
     const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
 
-    // Chromatic scales for sharps and flats
+    // Chromatic scales
     const chromaticSharps = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
     const chromaticFlats  = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
 
-    // Helper to detect accidental style
     function usesFlat(note) {
       return note.includes('b') || note.includes('♭');
     }
 
-    // Extract root note and suffix
-    const match = chord.match(/^([A-G][b#♭]?)(.*)$/);
-    if (!match) return chord;
-    let [ , root, suffix ] = match;
-
-    // Normalize symbols
-    root = root.replace('♭', 'b');
+    chord = chord.replace('♭', 'b');
     fromKey = fromKey.replace('♭', 'b');
     toKey = toKey.replace('♭', 'b');
 
-    // Decide which chromatic scale to use for output
-    const useFlats = usesFlat(root) || usesFlat(toKey);
+    // Convert Nashville number (e.g. "6b", "4#", etc.) to letter chord before continuing
+    const numberMatch = chord.match(/^([1-7])([b#]?)(.*)$/);
+    if (numberMatch) {
+      const [ , number, accidental, suffix ] = numberMatch;
+      const numberIndex = parseInt(number, 10) - 1;
+      const scaleSemitones = [0, 2, 4, 5, 7, 9, 11];
+      const sharpScale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
+      const baseSemitone = scaleSemitones[numberIndex];
+      let finalSemitone = baseSemitone;
+
+      if (accidental === '#') finalSemitone = (baseSemitone + 1) % 12;
+      if (accidental === 'b') finalSemitone = (baseSemitone + 11) % 12;
+
+      const chordRoot = sharpScale[finalSemitone];
+
+      chord = chordRoot + (suffix || '');
+    }
+
+    const match = chord.match(/^([A-G][b#]?)(.*)$/);
+    if (!match) return chord;
+
+    let [ , root, suffix ] = match;
+    const useFlats = usesFlat(root) || usesFlat(toKey);
     const chromatic = useFlats ? chromaticFlats : chromaticSharps;
 
-    // Find indexes
-    let fromIdx = chromaticSharps.indexOf(fromKey) !== -1 ? chromaticSharps.indexOf(fromKey) : chromaticFlats.indexOf(fromKey);
-    let toIdx = chromaticSharps.indexOf(toKey) !== -1 ? chromaticSharps.indexOf(toKey) : chromaticFlats.indexOf(toKey);
-    let rootIdx = chromaticSharps.indexOf(root) !== -1 ? chromaticSharps.indexOf(root) : chromaticFlats.indexOf(root);
+    const fromIdx = chromaticSharps.indexOf(fromKey) !== -1
+      ? chromaticSharps.indexOf(fromKey)
+      : chromaticFlats.indexOf(fromKey);
 
+    const toIdx = chromaticSharps.indexOf(toKey) !== -1
+      ? chromaticSharps.indexOf(toKey)
+      : chromaticFlats.indexOf(toKey);
+
+    const rootIdx = chromatic.indexOf(root);
     if (fromIdx === -1 || toIdx === -1 || rootIdx === -1) return chord;
 
-    // Calculate interval and new root
-    let interval = (toIdx - fromIdx + 12) % 12;
-    let newRoot = chromatic[(rootIdx + interval) % 12];
+    const shift = (toIdx - fromIdx + 12) % 12;
+    const newIndex = (rootIdx + shift) % 12;
+    const newRoot = chromatic[newIndex];
 
     if (nashvilleMode) {
-      // Both sharp and flat Nashville numbers
       const nashvilleNumbersSharps = ['1', '1#', '2', '2#', '3', '4', '4#', '5', '5#', '6', '6#', '7'];
       const nashvilleNumbersFlats  = ['1', '2b', '2', '3b', '3', '4', '5b', '5', '6b', '6', '7b', '7'];
 
-      // Find root index relative to the current key
       let keyIdx = chromatic.indexOf(toKey);
       if (keyIdx === -1) keyIdx = chromatic.indexOf(fromKey);
-      let relIdx = (chromatic.indexOf(newRoot) - keyIdx + 12) % 12;
+      const relIdx = (chromatic.indexOf(newRoot) - keyIdx + 12) % 12;
+      const nashNum = useFlats ? nashvilleNumbersFlats[relIdx] : nashvilleNumbersSharps[relIdx];
 
-      // Decide which accidental style to use for the number
-      let nashNum;
-      if (useFlats) {
-      nashNum = nashvilleNumbersFlats[relIdx];
-      } 
-      else {
-        nashNum = nashvilleNumbersSharps[relIdx];
-      }
       return nashNum + suffix;
     }
 
     return newRoot + suffix;
   }
+
+  function getMajorScale(key) {
+    const semitoneMap = {
+      C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3,
+      E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8,
+      A: 9, 'A#': 10, Bb: 10, B: 11,
+    };
+
+    const sharpScale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const steps = [0, 2, 4, 5, 7, 9, 11]; // Major scale intervals in semitones
+
+    const startIndex = semitoneMap[key];
+    if (startIndex === undefined) return ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+
+    return steps.map(step => sharpScale[(startIndex + step) % 12]);
+  }
+  function convertToNashville(chord, key) {
+    const scale = getMajorScale(key);
+    const match = chord.match(/^([A-G][#b]?)(.*)?$/);
+    if (!match) return chord;
+
+    const [ , root, suffix ] = match;
+    const index = scale.indexOf(root);
+    if (index === -1) return chord;
+
+    return (index + 1).toString() + (suffix || '');
+  }
+
 
   function transposeChordLine(line, fromKey, toKey) {
     const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
@@ -1069,6 +1269,7 @@ function renderUI() {
   }
 
   // Chord Sections Display
+  chordsPerRow = currentSongObj?.chordsPerRow || 4;
   if (container && currentSongObj && Array.isArray(currentSongObj.chords)) {
     currentSongObj.chords.forEach(section => {
       const songSectionContainer = document.createElement('div');
@@ -1081,25 +1282,6 @@ function renderUI() {
 
       const chords = document.createElement('div');
       chords.className = 'chords';
-
-      // Set chordsPerRow based on beats per bar
-      let beatsPerBar = 4;
-      if (currentSongObj && currentSongObj.beatsPerBar) {
-        beatsPerBar = parseInt(currentSongObj.beatsPerBar, 10) || 4;
-      }
-      let chordsPerRow;
-      if (beatsPerBar === 4) {
-        chordsPerRow = 6;
-        if (window.innerWidth < 600) {
-          chordsPerRow = 4;
-        }
-      } 
-      else if (beatsPerBar === 6) {
-        chordsPerRow = 4;
-        if (window.innerWidth < 600) {
-          chordsPerRow = 3;
-        }
-      }
 
       for (let i = 0; i < section.chords.length; i += chordsPerRow) {
         const rowDiv = document.createElement('div');
@@ -1246,28 +1428,33 @@ function renderUI() {
               // Remove the line
               const line = chordSpan.previousElementSibling;
               if (line && line.classList.contains('line')) {
-                line.remove();
+              line.remove();
               }
 
               chordSpan.remove();
 
               // Remove the section if no chords left
               if (currentSongObj.chords[sectionIdx].chords.length === 0) {
-                currentSongObj.chords.splice(sectionIdx, 1);
+              currentSongObj.chords.splice(sectionIdx, 1);
               }
             }
-            saveData();
-            renderUI();
-            return;
-          }
+          } 
           else {
-            // Transpose back to original key before saving
-            const chordInOriginalKey = transposeChord(chordText, selectedKey, originalKey);
-            currentSongObj.chords[sectionIdx].chords[chordIdx] = chordInOriginalKey; 
-          }
-          const transposedChord = transposeChord(chordText, selectedKey, originalKey);
-          currentSongObj.chords[sectionIdx].chords[chordIdx] = transposedChord;
+            const numberRegex = /^([1-7])([b#]?)(.*)$/;
+            const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
 
+            if (numberRegex.test(chordText) && !nashvilleMode) {
+              const [ , number, accidental, suffix ] = chordText.match(numberRegex);
+              const converted = transposeChord(number + accidental + suffix, 'C', selectedKey);
+              currentSongObj.chords[sectionIdx].chords[chordIdx] = transposeChord(converted, selectedKey, originalKey);
+              chordSpan.textContent = converted;
+            }
+            else {
+              const chordInOriginalKey = transposeChord(chordText, selectedKey, originalKey);
+              currentSongObj.chords[sectionIdx].chords[chordIdx] = chordInOriginalKey;
+              chordSpan.textContent = transposeChord(chordInOriginalKey, originalKey, selectedKey);
+            }
+          }
           saveData();
           renderUI();
         });
@@ -1289,7 +1476,6 @@ function renderUI() {
         if (!Array.isArray(currentSongObj.chords)) {
           currentSongObj.chords = [];
         }
-        let beatsPerBar = 4;
       if (currentSongObj && currentSongObj.beatsPerBar) {
         beatsPerBar = parseInt(currentSongObj.beatsPerBar, 10) || 4;
       }
@@ -1679,6 +1865,7 @@ function renderUI() {
   // Show live section if it was triggered from the main page
   if (localStorage.getItem(`liveSection_${currentUser}`) === 'true') {
     localStorage.setItem(`openMapForSong_${currentUser}`, null);
+    document.querySelector('.title').style.textAlign = 'right';
     showAllLiveSongsAndSections();
     localStorage.removeItem(`liveSection_${currentUser}`);
   }
@@ -1690,7 +1877,10 @@ renderUI();
 
 
 // --- Dark Mode ---
-function darkMode(){
+async function darkMode(){
+  const user = firebase.auth().currentUser;
+  if (!user) return;
+
   document.body.classList.toggle('dark-mode');
   const isDarkMode = document.body.classList.contains('dark-mode'); // True if dark mode is active
   const darkBtn = document.querySelector('#darkBtn');
@@ -1701,7 +1891,9 @@ function darkMode(){
     else {
       darkBtn.textContent = '☾⋆';
     }
-  localStorage.setItem(`darkMode_${currentUser}`, isDarkMode);
+    await firebase.firestore().collection('users').doc(user.uid).set({
+      darkMode: isDarkMode
+    }, { merge: true });
   }
 }
 
