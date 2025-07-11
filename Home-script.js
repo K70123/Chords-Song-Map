@@ -555,7 +555,7 @@ async function darkMode(){
         iconSpan.style.width = '102px';
       }
     }
-    await firebase.firestore().collection('users').doc(user.uid).set({
+    await firebase.firestore().collection('users').doc(currentUser).set({
       darkMode: isDarkMode
     }, { merge: true });
   }
