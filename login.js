@@ -13,6 +13,13 @@ if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
 
+// Check if user is already logged in
+firebase.auth().onAuthStateChanged((user) => {
+  if (user) {
+    window.location.href = 'Home-index.html';
+  }
+});
+
 document.getElementById('loginForm').addEventListener('submit', function(e) {
   e.preventDefault();
   const email = document.querySelector('input[name="email"]').value;
@@ -34,5 +41,20 @@ document.getElementById('loginForm').addEventListener('submit', function(e) {
     })
     .catch((error) => {
       alert(error.message);
+    });
+});
+
+document.querySelector('.psw').addEventListener('click', function (e) {
+  e.preventDefault();
+  
+  const email = prompt("Please enter your email to reset your password:");
+  if (!email) return;
+
+  firebase.auth().sendPasswordResetEmail(email)
+    .then(() => {
+      alert("Password reset email sent. Please check your inbox.");
+    })
+    .catch((error) => {
+      alert("Error: " + error.message);
     });
 });
