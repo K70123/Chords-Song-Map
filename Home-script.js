@@ -51,7 +51,8 @@ firebase.auth().onAuthStateChanged(async (user) => {
           if (window.innerWidth < 600) {
             iconSpan.style.height = '36px';
             iconSpan.style.width = '95px';
-          } else {
+          } 
+          else {
             iconSpan.style.height = '62px';
             iconSpan.style.width = '64.5px';
           }
@@ -129,6 +130,10 @@ document.getElementById('addArtistBtn').addEventListener('click', function() {
 
   // Add the new artist to the global appData array
   appData.push({ artist: 'Unknown Artist', songs: [] });
+
+  // Sort artist alphabetically
+  appData.sort((a, b) => a.artist.toLowerCase().localeCompare(b.artist.toLowerCase()));
+
   saveData(); // Save the updated appData to Firestore
   renderUI(); // Re-render the UI to display the new artist
 });
@@ -240,6 +245,9 @@ function renderUI() {
       // Save new name (without the arrow)
       const newName = artistDiv.textContent.replace(arrowSpan.textContent, '').trim() || 'Unknown';
       appData[artistIdx].artist = newName;
+
+      // Sort artist alphabetically
+      appData.sort((a, b) => a.artist.toLowerCase().localeCompare(b.artist.toLowerCase()));
 
       saveData();
       renderUI();
@@ -545,7 +553,8 @@ async function darkMode(){
         iconSpan.style.height = '36px';
         iconSpan.style.width = '95px';
       }
-    } else {
+    }
+    else {
       iconSpan.textContent = '☾⋆';
       textSpan.textContent = 'Dark Mode';
       iconSpan.style.height = '70px';
@@ -578,7 +587,6 @@ function liveSection() {
 }
 
 
-// --- Log Out ---
 function logOut() {
   firebase.auth().signOut().then(() => {
     window.location.href = "index.html";
