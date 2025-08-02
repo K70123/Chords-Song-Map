@@ -1636,6 +1636,91 @@ function renderUI() {
       li.textContent = part;
       songMapList.appendChild(li);
     });
+
+    // Add drag & drop for current song (desktop + mobile)
+    const currentParts = songMapList.querySelectorAll('.songMapPart');
+
+    currentParts.forEach(part => {
+      part.setAttribute('draggable', 'true');
+
+      // --- Desktop drag ---
+      part.addEventListener('dragstart', function (e) {
+        e.dataTransfer.effectAllowed = 'move';
+        part.classList.add('dragging');
+        window.draggedPart = part;
+      });
+
+      part.addEventListener('dragend', async function () {
+        part.classList.remove('dragging');
+        window.draggedPart = null;
+        const reordered = Array.from(songMapList.querySelectorAll('.songMapPart'))
+          .map(p => p.textContent.trim());
+        currentSongObj.songMap = reordered;
+        await saveData();
+        renderUI();
+      });
+
+      // --- Mobile touch drag ---
+      let startY = 0;
+      part.addEventListener('touchstart', function (e) {
+        e.preventDefault();
+        window.draggedPart = part;
+        part.classList.add('dragging');
+        startY = e.touches[0].clientY;
+      });
+
+      part.addEventListener('touchmove', function (e) {
+        e.preventDefault();
+        const touchY = e.touches[0].clientY;
+        const afterElement = getDragAfterElement(songMapList, touchY);
+        const dragging = document.querySelector('.dragging');
+        if (afterElement == null) {
+          songMapList.appendChild(dragging);
+        } else {
+          songMapList.insertBefore(dragging, afterElement);
+        }
+      });
+
+      part.addEventListener('touchend', async function () {
+        const dragging = document.querySelector('.dragging');
+        if (dragging) {
+          dragging.classList.remove('dragging');
+          window.draggedPart = null;
+          const reordered = Array.from(songMapList.querySelectorAll('.songMapPart'))
+            .map(p => p.textContent.trim());
+          currentSongObj.songMap = reordered;
+          await saveData();
+          renderUI();
+        }
+      });
+    });
+
+    // Shared dragover handler for desktop
+    songMapList.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      const dragging = document.querySelector('.dragging');
+      if (!dragging) return;
+      const afterElement = getDragAfterElement(songMapList, e.clientY);
+      if (afterElement == null) {
+        songMapList.appendChild(dragging);
+      } else {
+        songMapList.insertBefore(dragging, afterElement);
+      }
+    });
+
+    // Utility: find nearest element under cursor/touch
+    function getDragAfterElement(container, y) {
+      const elements = [...container.querySelectorAll('.songMapPart:not(.dragging)')];
+      return elements.reduce((closest, el) => {
+        const box = el.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) {
+          return { offset: offset, element: el };
+        } else {
+          return closest;
+        }
+      }, { offset: -Infinity }).element;
+    }
   }
 
 
@@ -1764,64 +1849,6 @@ function renderUI() {
       }
     });
   });
-
-
-  // Song Map List Draggable
-  function makeSongMapPartsDraggable() {
-    const list = document.querySelector('.songMapList');
-    const parts = list.querySelectorAll('.songMapPart');
-
-    parts.forEach(part => {
-      part.setAttribute('draggable', 'true');
-
-      part.addEventListener('dragstart', function(e) {
-        e.dataTransfer.effectAllowed = 'move';
-        part.classList.add('dragging');
-        window.draggedPart = part;
-      });
-
-      part.addEventListener('dragend', function() {
-        part.classList.remove('dragging');
-        window.draggedPart = null;
-
-        const list = document.querySelector('.songMapList');
-        const partElements = list.querySelectorAll('.songMapPart');
-        currentSongObj.songMap = Array.from(partElements).map(part => part.textContent.trim());
-
-        saveData();
-      });
-    });
-
-    list.addEventListener('dragover', function(e) {
-      e.preventDefault();
-      const dragging = document.querySelector('.dragging');
-      if (!dragging) return;
-        const afterElement = getDragAfterElement(list, e.clientY);
-      if (afterElement == null) {
-        list.appendChild(dragging);
-      } 
-      else {
-        list.insertBefore(dragging, afterElement);
-      }
-    });
-
-    function getDragAfterElement(container, y) {
-      const draggableElements = [...container.querySelectorAll('.songMapPart:not(.dragging)')];
-      return draggableElements.reduce((closest, child) => {
-        const box = child.getBoundingClientRect();
-        const offset = y - box.top - box.height / 2;
-        if (offset < 0 && offset > closest.offset) {
-          return { offset: offset, element: child };
-        } 
-        else {
-          return closest;
-        }
-      }, { offset: -Infinity }).element;
-    }
-  }
-
-  // Call this after rendering songMapList
-  makeSongMapPartsDraggable();
 
 
   // After rendering, check if nextChordFocus is set
