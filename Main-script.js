@@ -34,7 +34,6 @@ firebase.auth().onAuthStateChanged(async (user) => {
   }
 
   currentUser = user.uid; // Set currentUser UID
-  console.log("Authenticated user:", currentUser);
 
   try {
     const doc = await firebase.firestore().collection('users').doc(currentUser).get();
@@ -1790,66 +1789,102 @@ function renderUI() {
   }
 
 
-  // Rename/Delete Song Map Part
-  const songMapParts = document.querySelectorAll('.songMapPart');
-  songMapParts.forEach(part => {
-    part.addEventListener('dblclick', function(e) {
-      e.preventDefault();
-      part.contentEditable = true;
+  // Song Map Editing
+  function renderSongMap(songMap) {
+    const songMapList = document.querySelector('.songMapList');
+    songMapList.innerHTML = '';
+
+    songMap.forEach((partText, index) => {
+      const part = document.createElement('li');
+      part.className = 'songMapPart';
+      part.textContent = partText;
+
+      // -- Enable editing on double-click (desktop) --
+      part.addEventListener('dblclick', () => startEditing(part, index));
+
+      // -- Enable editing on double-tap (mobile) --
+      let lastTap = 0;
+      part.addEventListener('touchend', () => {
+        const now = Date.now();
+        if (now - lastTap < 300) {
+          startEditing(part, index);
+        }
+        lastTap = now;
+      });
+
+      songMapList.appendChild(part);
+    });
+
+    function startEditing(part, index) {
+      part.setAttribute('contentEditable', 'true');
       part.focus();
-      // Select all text of the part
       document.execCommand('selectAll', false, null);
-      nextChordFocus = null; // Reset nextChordFocus since we're editing a part
-    });
+      part.dataset.editing = 'true';
+      part.setAttribute('draggable', 'false');
 
-    // Double tap to show the artist name edit button
-    part.addEventListener('touchend', function () {
-      const currentTime = new Date().getTime();
-      const tapLength = currentTime - lastTap;
-
-      if (tapLength < dblTapThreshold && tapLength > 0) {
-        part.contentEditable = true;
-        part.focus();
-        // Select all text of the part
-        document.execCommand('selectAll', false, null);
-        nextChordFocus = null;
-      }
-
-      lastTap = currentTime;
-    });
-
-    // Enter key to save changes and focus next part
-    part.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const allParts = Array.from(document.querySelectorAll('.songMapPart'));
-        const idx = allParts.indexOf(part);
-        if (allParts[idx + 1]) {
-          nextSongMapFocusIdx = idx + 1;
-        } 
-        else {
-          nextSongMapFocusIdx = null;
+      // Works on desktop
+      part.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          await finishAndEditNext(part, index);
         }
-        part.blur(); // This will trigger renderUI via blur handler
-      }
-    });
-    // Blur event to save changes
-    part.addEventListener('blur', function() {
-      part.contentEditable = false;
-      const allParts = Array.from(document.querySelectorAll('.songMapPart'));
-      const idx = allParts.indexOf(part);
-      if (currentSongObj && currentSongObj.songMap) {
-        currentSongObj.songMap[idx] = part.textContent.trim();
-        // If the part is empty, remove it
-        if (part.textContent.trim() === '') {
-          currentSongObj.songMap.splice(idx, 1);
-        }
-        saveData();
-        renderUI(); // Re-render to reflect changes
-      }
-    });
-  });
+      });
 
+      // Better mobile support: use beforeinput for enter detection
+      part.addEventListener('beforeinput', async (e) => {
+        if (e.inputType === 'insertParagraph') {
+          e.preventDefault();
+          await finishAndEditNext(part, index);
+        }
+      });
+
+      // Fallback for blur
+      part.addEventListener('blur', async () => {
+        if (part.dataset.editing !== 'true') return;
+        part.dataset.editing = 'false';
+        part.removeAttribute('contentEditable');
+        part.setAttribute('draggable', 'true');
+        await saveEdit(part, index);
+      }, { once: true });
+    }
+    async function finishAndEditNext(part, index) {
+      part.dataset.editing = 'false';
+      part.removeAttribute('contentEditable');
+      part.setAttribute('draggable', 'true');
+      await saveEdit(part, index);
+
+      // Focus next part
+      const songMapList = document.querySelector('.songMapList');
+      const next = songMapList.children[index + 1];
+      if (next && next.classList.contains('songMapPart')) {
+        setTimeout(() => {
+          startEditing(next, index + 1);
+        }, 10);
+      }
+    }
+    async function saveEdit(part, index) {
+      const newValue = part.textContent.trim();
+
+      if (newValue === '') {
+        currentSongObj.songMap.splice(index, 1);
+      } else {
+        currentSongObj.songMap[index] = newValue;
+      }
+
+      // Sync with appData
+      for (const artist of appData) {
+        const song = artist.songs.find(s => s.name === currentSongObj.name);
+        if (song) {
+          song.songMap = [...currentSongObj.songMap];
+        }
+      }
+
+      await saveData();
+      renderSongMap(currentSongObj.songMap);
+    }
+  }
+  renderSongMap((currentSongObj && currentSongObj.songMap) || []);
+  
 
   // After rendering, check if nextChordFocus is set
   if (nextChordFocus) {
@@ -2027,3 +2062,4 @@ document.addEventListener('touchstart', function (e) {
 function manual(){
   window.location.href = 'manual.html';
 }
+
