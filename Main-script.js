@@ -269,23 +269,20 @@ function renderUI() {
   // Find and render each live song
   liveSongs.forEach(songName => {
     let songObj = null;
-    for (const artistObj of appData) {
-      const originalSongObj = artistObj.songs.find(song => song.name === songName);
-      if (!originalSongObj) continue;
-      // Use live data if it exists, otherwise clone the original
-      if (liveSongsData[songName] !== undefined) {
-          songObj = liveSongsData[songName]; // Use the actual object, not a copy!
-      }
-      else {
-        songObj = JSON.parse(JSON.stringify(originalSongObj));
-        if (!Array.isArray(songObj.songMap) || songObj.songMap.length === 0) {
-          songObj.songMap = Array.isArray(originalSongObj.songMap)
-          ? [...originalSongObj.songMap]
-          : [];
+    let originalSongObj = null;
+    for (const artist of appData) {
+      originalSongObj = artist.songs.find(song => song.name === songName);
+      if (originalSongObj) {
+        // Always refresh the live copy from the original when showing live songs
+        if (liveSongsData[songName]) {
+          songObj = liveSongsData[songName]; // Use the live copy
+        } 
+        else {
+          songObj = JSON.parse(JSON.stringify(originalSongObj));
+          liveSongsData[songName] = songObj; // Only copy if not already present
         }
-        liveSongsData[songName] = songObj; // Save the copy for future edits
+        break;
       }
-      break;
     }
     if (!songObj){
       console.warn(`Live song "${songName}" not found in appData. It might have been deleted.`);
