@@ -185,8 +185,8 @@ function renderUI() {
 
     li.addEventListener('touchstart', async function (e) {
       // Start the timer
+      e.preventDefault();
       holdTimeout = setTimeout(() => {
-        e.preventDefault();
         // Remove the right-clicked song from the liveSongs array
         liveSongs = liveSongs.filter(name => name !== songName);
 
@@ -621,8 +621,8 @@ function renderUI() {
       // Set the original key on hold tap
       chordsContainer.querySelector('.beatSpan').addEventListener('touchstart', function (e) {
         // Start the timer
+        e.preventDefault();
         holdTimeout = setTimeout(() => {
-          e.preventDefault();
           const newBeatSpan = prompt('Enter The New Beats Per Bar');
           if (newBeatSpan !== "") {
             songObj.beatsPerBar = newBeatSpan;
@@ -663,8 +663,8 @@ function renderUI() {
       // Set the original key on hold tap
       chordsContainer.querySelector('.chordsPerRow').addEventListener('touchstart', async function (e) {
         // Start the timer
+        e.preventDefault();
         holdTimeout = setTimeout(() => {
-          e.preventDefault();
           editChordsPerRowPrompt();
         }, holdTapThreshold);
       });
@@ -950,7 +950,7 @@ function renderUI() {
               });
               sectionTitle.addEventListener('blur', async function() {
                 sectionTitle.contentEditable = false;
-                newSectionName = sectionTitle.textContent;
+                const newSectionName = sectionTitle.textContent;
                 if (newSectionName !== null && newSectionName.trim() !== "") {
                   // Find the index of this sectionTitle among all section titles within the current song's container
                   const allSectionTitles = Array.from(sectionDiv.parentNode.querySelectorAll('.sectionTitle'));
@@ -1037,8 +1037,8 @@ function renderUI() {
   // Set the original key on hold tap
   container.querySelector('.beatSpan').addEventListener('touchstart', function (e) {
     // Start the timer
+    e.preventDefault();
     holdTimeout = setTimeout(() => {
-      e.preventDefault();
       const newBeatSpan = prompt('Enter The New Beats Per Bar');
       if (newBeatSpan !== "") {
         currentSongObj.beatsPerBar = newBeatSpan;
@@ -1600,8 +1600,8 @@ function renderUI() {
       // Set the original key on hold tap
       btn.addEventListener('touchstart', function (e) {
         // Start the timer
+        e.preventDefault();
         holdTimeout = setTimeout(() => {
-          e.preventDefault();
           if (currentSongObj && btn.textContent !== 'Num') {
             currentSongObj.originalKey = btn.textContent; // Set per-song original key
             saveData(); // Save to localStorage
@@ -1621,109 +1621,10 @@ function renderUI() {
     });
   }
 
-
   const songMapContainer = document.querySelector('.songMapContainer');
   songMapContainer.style.display = 'block';
-  
-  // Song Map
-  const songMapList = document.querySelector('.songMapList');
-  if (songMapList && currentSongObj && Array.isArray(currentSongObj.songMap)) {
-    songMapList.innerHTML = '';
-    currentSongObj.songMap.forEach(part => {
-      const li = document.createElement('li');
-      li.className = 'songMapPart';
-      li.textContent = part;
-      songMapList.appendChild(li);
-    });
 
-    // Add drag & drop for current song (desktop + mobile)
-    const currentParts = songMapList.querySelectorAll('.songMapPart');
-
-    currentParts.forEach(part => {
-      part.setAttribute('draggable', 'true');
-
-      // --- Desktop drag ---
-      part.addEventListener('dragstart', function (e) {
-        e.dataTransfer.effectAllowed = 'move';
-        part.classList.add('dragging');
-        window.draggedPart = part;
-      });
-
-      part.addEventListener('dragend', async function () {
-        part.classList.remove('dragging');
-        window.draggedPart = null;
-        const reordered = Array.from(songMapList.querySelectorAll('.songMapPart'))
-          .map(p => p.textContent.trim());
-        currentSongObj.songMap = reordered;
-        await saveData();
-        renderUI();
-      });
-
-      // --- Mobile touch drag ---
-      let startY = 0;
-      part.addEventListener('touchstart', function (e) {
-        e.preventDefault();
-        window.draggedPart = part;
-        part.classList.add('dragging');
-        startY = e.touches[0].clientY;
-      });
-
-      part.addEventListener('touchmove', function (e) {
-        e.preventDefault();
-        const touchY = e.touches[0].clientY;
-        const afterElement = getDragAfterElement(songMapList, touchY);
-        const dragging = document.querySelector('.dragging');
-        if (afterElement == null) {
-          songMapList.appendChild(dragging);
-        } else {
-          songMapList.insertBefore(dragging, afterElement);
-        }
-      });
-
-      part.addEventListener('touchend', async function () {
-        const dragging = document.querySelector('.dragging');
-        if (dragging) {
-          dragging.classList.remove('dragging');
-          window.draggedPart = null;
-          const reordered = Array.from(songMapList.querySelectorAll('.songMapPart'))
-            .map(p => p.textContent.trim());
-          currentSongObj.songMap = reordered;
-          await saveData();
-          renderUI();
-        }
-      });
-    });
-
-    // Shared dragover handler for desktop
-    songMapList.addEventListener('dragover', function (e) {
-      e.preventDefault();
-      const dragging = document.querySelector('.dragging');
-      if (!dragging) return;
-      const afterElement = getDragAfterElement(songMapList, e.clientY);
-      if (afterElement == null) {
-        songMapList.appendChild(dragging);
-      } else {
-        songMapList.insertBefore(dragging, afterElement);
-      }
-    });
-
-    // Utility: find nearest element under cursor/touch
-    function getDragAfterElement(container, y) {
-      const elements = [...container.querySelectorAll('.songMapPart:not(.dragging)')];
-      return elements.reduce((closest, el) => {
-        const box = el.getBoundingClientRect();
-        const offset = y - box.top - box.height / 2;
-        if (offset < 0 && offset > closest.offset) {
-          return { offset: offset, element: el };
-        } else {
-          return closest;
-        }
-      }, { offset: -Infinity }).element;
-    }
-  }
-
-
-   // Add chordsContainer for artists and their songs
+  // Add chordsContainer for artists and their songs
   const artistContainer = document.createElement('div');
   artistContainer.className = 'artistContainer';
   leftContainer.appendChild(artistContainer);
@@ -1795,92 +1696,180 @@ function renderUI() {
     songMapList.innerHTML = '';
 
     songMap.forEach((partText, index) => {
-      const part = document.createElement('li');
-      part.className = 'songMapPart';
-      part.textContent = partText;
+        const part = document.createElement('li');
+        part.className = 'songMapPart';
+        part.textContent = partText;
+        part.setAttribute('draggable', 'true');
 
-      // -- Enable editing on double-click (desktop) --
-      part.addEventListener('dblclick', () => startEditing(part, index));
+        // === Editing ===
+        let lastTap = 0;
+        part.addEventListener('dblclick', () => startEditing(part, index));
+        part.addEventListener('touchend', () => {
+            const now = Date.now();
+            if (now - lastTap < 300) startEditing(part, index);
+            lastTap = now;
+        });
 
-      // -- Enable editing on double-tap (mobile) --
-      let lastTap = 0;
-      part.addEventListener('touchend', () => {
-        const now = Date.now();
-        if (now - lastTap < 300) {
-          startEditing(part, index);
-        }
-        lastTap = now;
-      });
+        // === Desktop Drag ===
+        part.addEventListener('dragstart', (e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            part.classList.add('dragging');
+        });
+        part.addEventListener('dragend', async () => {
+            part.classList.remove('dragging');
+            saveReorder();
+        });
 
-      songMapList.appendChild(part);
+        // === Mobile Drag ===
+        let startY = 0;
+        part.addEventListener('touchstart', (e) => {
+            startY = e.touches[0].clientY;
+            part.classList.add('dragging');
+            e.preventDefault();
+        });
+        part.addEventListener('touchmove', (e) => {
+            const touchY = e.touches[0].clientY;
+            const after = getDragAfterElement(songMapList, touchY);
+            const dragging = document.querySelector('.dragging');
+            if (after == null) songMapList.appendChild(dragging);
+            else songMapList.insertBefore(dragging, after);
+        });
+        part.addEventListener('touchend', async () => {
+            part.classList.remove('dragging');
+            saveReorder();
+        });
+
+        songMapList.appendChild(part);
     });
 
-    function startEditing(part, index) {
-      part.setAttribute('contentEditable', 'true');
-      part.focus();
-      document.execCommand('selectAll', false, null);
-      part.dataset.editing = 'true';
-      part.setAttribute('draggable', 'false');
+    // Shared dragover for desktop
+    songMapList.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        const after = getDragAfterElement(songMapList, e.clientY);
+        const dragging = document.querySelector('.dragging');
+        if (!dragging) return;
+        if (after == null) songMapList.appendChild(dragging);
+        else songMapList.insertBefore(dragging, after);
+    });
 
-      // Works on desktop
-      part.addEventListener('keydown', async (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          await finishAndEditNext(part, index);
-        }
-      });
-
-      // Better mobile support: use beforeinput for enter detection
-      part.addEventListener('beforeinput', async (e) => {
-        if (e.inputType === 'insertParagraph') {
-          e.preventDefault();
-          await finishAndEditNext(part, index);
-        }
-      });
-
-      // Fallback for blur
-      part.addEventListener('blur', async () => {
-        if (part.dataset.editing !== 'true') return;
-        part.dataset.editing = 'false';
-        part.removeAttribute('contentEditable');
-        part.setAttribute('draggable', 'true');
-        await saveEdit(part, index);
-      }, { once: true });
+    function getDragAfterElement(container, y) {
+        const elements = [...container.querySelectorAll('.songMapPart:not(.dragging)')];
+        return elements.reduce((closest, el) => {
+            const box = el.getBoundingClientRect();
+            const offset = y - box.top - box.height / 2;
+            if (offset < 0 && offset > closest.offset) {
+                return { offset, element: el };
+            } else {
+                return closest;
+            }
+        }, { offset: -Infinity }).element;
     }
-    async function finishAndEditNext(part, index) {
-      part.dataset.editing = 'false';
-      part.removeAttribute('contentEditable');
-      part.setAttribute('draggable', 'true');
-      await saveEdit(part, index);
 
-      // Focus next part
-      const songMapList = document.querySelector('.songMapList');
-      const next = songMapList.children[index + 1];
-      if (next && next.classList.contains('songMapPart')) {
-        setTimeout(() => {
-          startEditing(next, index + 1);
-        }, 10);
-      }
+    async function saveReorder() {
+        currentSongObj.songMap = [...songMapList.querySelectorAll('.songMapPart')].map(p => p.textContent.trim());
+        for (const artist of appData) {
+            const song = artist.songs.find(s => s.name === currentSongObj.name);
+            if (song) song.songMap = [...currentSongObj.songMap];
+        }
+        await saveData();
     }
-    async function saveEdit(part, index) {
+
+    async function saveEdit(part, index, options = {}) {
       const newValue = part.textContent.trim();
 
+      // Ensure songMap is an array
+      if (!Array.isArray(currentSongObj.songMap)) {
+      currentSongObj.songMap = [];
+      }
+
       if (newValue === '') {
-        currentSongObj.songMap.splice(index, 1);
-      } else {
-        currentSongObj.songMap[index] = newValue;
+      currentSongObj.songMap.splice(index, 1);
+      } 
+      else {
+      currentSongObj.songMap[index] = newValue;
       }
 
       // Sync with appData
       for (const artist of appData) {
-        const song = artist.songs.find(s => s.name === currentSongObj.name);
-        if (song) {
-          song.songMap = [...currentSongObj.songMap];
+      const song = artist.songs.find(s => s.name === currentSongObj.name);
+      if (song) {
+        if (!Array.isArray(song.songMap)) {
+        song.songMap = [];
         }
+        song.songMap = [...currentSongObj.songMap];
+      }
       }
 
       await saveData();
+
+      // Only re-render if not skipping
+      if (!options.skipRender) {
       renderSongMap(currentSongObj.songMap);
+      }
+    }
+
+    // Remove blur on Enter navigation (only blur if not moving to next)
+    function startEditing(part, index) {
+      part.setAttribute('contentEditable', 'true');
+      part.focus();
+      document.execCommand('selectAll', false, null);
+      part.setAttribute('draggable', 'false');
+
+      // Remove any previous keydown listeners to avoid stacking
+      part.onkeydown = null;
+
+      // Remove previous blur handler to avoid stacking
+      part.onblur = null;
+
+      let navigatingToNext = false;
+
+      part.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        navigatingToNext = true;
+        await saveEdit(part, index, { skipRender: true });
+        // Move to next part if exists
+        const songMapList = document.querySelector('.songMapList');
+        const next = songMapList.children[index + 1];
+        if (next && next.classList.contains('songMapPart')) {
+        part.removeAttribute('contentEditable');
+        part.setAttribute('draggable', 'true');
+        startEditing(next, index + 1);
+        } 
+        else {
+        navigatingToNext = false;
+        part.blur();
+        }
+      }
+      });
+
+      part.addEventListener('beforeinput', async (e) => {
+      if (e.inputType === 'insertParagraph') {
+        e.preventDefault();
+        navigatingToNext = true;
+        await saveEdit(part, index, { skipRender: true });
+        const songMapList = document.querySelector('.songMapList');
+        const next = songMapList.children[index + 1];
+        if (next && next.classList.contains('songMapPart')) {
+        part.removeAttribute('contentEditable');
+        part.setAttribute('draggable', 'true');
+        startEditing(next, index + 1);
+        } 
+        else {
+        navigatingToNext = false;
+        part.blur();
+        }
+      }
+      });
+
+      part.addEventListener('blur', async () => {
+      // Only blur if not navigating to next
+      if (!navigatingToNext) {
+        part.removeAttribute('contentEditable');
+        part.setAttribute('draggable', 'true');
+        await saveEdit(part, index);
+      }
+      }, { once: true });
     }
   }
   renderSongMap((currentSongObj && currentSongObj.songMap) || []);
@@ -1908,28 +1897,6 @@ function renderUI() {
       }
     }
     nextChordFocus = null;
-  }
-
-
-  // After rendering, check if nextSongMapFocusIdx is set
-  if (nextSongMapFocusIdx !== null) {
-    const allParts = Array.from(document.querySelectorAll('.songMapPart'));
-    const nextPart = allParts[nextSongMapFocusIdx];
-    if (nextPart) {
-      nextPart.contentEditable = true;
-      nextPart.focus();
-      // Select all text of the next part
-      document.execCommand('selectAll', false, null);
-    }
-    nextSongMapFocusIdx = null; // Reset after focusing
-  }
-
-  // Show live section if it was triggered from the main page
-  if (localStorage.getItem(`liveSection_${currentUser}`) === 'true') {
-    localStorage.setItem(`openMapForSong_${currentUser}`, null);
-    document.querySelector('.title').style.textAlign = 'right';
-    showAllLiveSongsAndSections();
-    localStorage.removeItem(`liveSection_${currentUser}`);
   }
 }
 
