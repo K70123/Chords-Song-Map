@@ -578,14 +578,14 @@ function liveSection() {
   }, 0);
 
   if (totalSongs > 0) {
-    window.location.href = "Main Page.html";
     localStorage.setItem(`liveSection_${currentUser}`, 'true');
+    window.location.href = "Main Page.html"; // Go immediately, then set flag
   }
   else {
     alert("No songs made yet! Please add a song first.");
   }
 }
-
+window.liveSection = liveSection;
 
 function logOut() {
   firebase.auth().signOut().then(() => {
