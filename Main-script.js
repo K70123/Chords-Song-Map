@@ -26,222 +26,140 @@ let liveSongsData = {};
 let beatsPerBar = 4;
 let chordsPerRow = 6;
 
-// --- Data Model and Persistence ---
-firebase.auth().onAuthStateChanged(async (user) => {
-  if (!user) {
-    window.location.href = "index.html"; // Redirect to login if not authenticated
-    return;
-  }
+function transposeChord(chord, fromKey, toKey) {
+    const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
 
-  currentUser = user.uid; // Set currentUser UID
+    // Chromatic scales
+    const chromaticSharps = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const chromaticFlats  = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
 
-  try {
-    const doc = await firebase.firestore().collection('users').doc(currentUser).get();
-
-    // Dark mode loading
-    if (doc.exists) {
-      const userData = doc.data();
-      appData = userData.appData || []; // Load appData into your global variable
-      liveSongs = userData.liveSongs || []; // Load liveSongs into your global variable
-      liveSongsData = userData.liveSongsData || {}; // Load liveSongsData into your global variable
-      const isDarkMode = userData.darkMode === true; // Load darkMode state
-
-      const darkBtn = document.querySelector('#darkBtn');
-
-      if (isDarkMode) {
-        document.body.classList.add('dark-mode');
-        darkBtn.textContent = '☼';
-      }
-      else {
-        document.body.classList.remove('dark-mode');
-        darkBtn.textContent = '☾⋆';
-      }
-    } 
-    else {
-      appData = []; // Default to empty array if no user data found
-      liveSongs = []; // Default to empty array if no live songs found
-      document.body.classList.remove('dark-mode'); // Default to light mode if no data
+    function usesFlat(note) {
+      return note.includes('b') || note.includes('♭');
     }
 
-    renderUI(); // Render UI after all data (appData and dark mode) is loaded
-    document.body.classList.remove('loading'); // Remove loading class to show content
-  } 
-  catch (error) {
-    console.error("Error loading user data from Firestore:", error);
-    // Potentially redirect to an error page or show a user-friendly message
-  }
-});
+    chord = chord.replace('♭', 'b');
+    fromKey = fromKey.replace('♭', 'b');
+    toKey = toKey.replace('♭', 'b');
 
+    // Convert Nashville number (e.g. "6b", "4#", etc.) to letter chord before continuing
+    const numberMatch = chord.match(/^([1-7])([b#]?)(.*)$/);
+    if (numberMatch) {
+      const [ , number, accidental, suffix ] = numberMatch;
+      const numberIndex = parseInt(number, 10) - 1;
+      const scaleSemitones = [0, 2, 4, 5, 7, 9, 11];
+      const sharpScale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
-// Save data to Firestore
-async function saveData() {
-  if (!currentUser) { // Ensure currentUser is available
-    console.error("User not logged in, cannot save data.");
-    return;
-  }
-  // Add a defensive check here to ensure appData is an array before saving
-  if (!Array.isArray(appData)) {
-      console.error("appData is not an array, cannot save:", appData);
-      appData = []; // Reset to empty array to prevent future errors
-  }
+      const baseSemitone = scaleSemitones[numberIndex];
+      let finalSemitone = baseSemitone;
 
-  try {
-    await firebase.firestore().collection('users').doc(currentUser).set({
-      appData: appData, // THIS refers to the global `appData` variable
-      liveSongs: liveSongs,
-      liveSongsData: liveSongsData
-    }, { merge: true });  
-  } 
-  catch (error) {
-    console.error("Error saving app data to Firestore:", error);
-  }
-}
+      if (accidental === '#') finalSemitone = (baseSemitone + 1) % 12;
+      if (accidental === 'b') finalSemitone = (baseSemitone + 11) % 12;
 
+      const chordRoot = sharpScale[finalSemitone];
 
-window.keyList = [
-  'A', 'A#', 'Bb', 'B', 'C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'Num'
-];
+      chord = chordRoot + (suffix || '');
+    }
 
-let nextChordFocus = null; // To track the next chord to focus after editing
-let nextSongMapFocusIdx = null; // To track the next song map part to focus after editing
+    const match = chord.match(/^([A-G][b#]?)(.*)$/);
+    if (!match) return chord;
 
-localStorage.setItem(`nashvilleMode_${currentUser}`, 'false');
+    let [ , root, suffix ] = match;
+    const useFlats = usesFlat(root) || usesFlat(toKey);
+    const chromatic = useFlats ? chromaticFlats : chromaticSharps;
 
-// --- UI Rendering ---
-function renderUI() {
-  let lastTap = 0;
-  const dblTapThreshold = 300; // max ms between taps to count as double-tap
-  const holdTapThreshold = 350; // min ms time to count as hold tap
+    const fromIdx = chromaticSharps.indexOf(fromKey) !== -1
+      ? chromaticSharps.indexOf(fromKey)
+      : chromaticFlats.indexOf(fromKey);
 
-  const buttons = document.querySelectorAll('.menuBtn');
-  const menu = document.querySelector('.menu');
+    const toIdx = chromaticSharps.indexOf(toKey) !== -1
+      ? chromaticSharps.indexOf(toKey)
+      : chromaticFlats.indexOf(toKey);
 
-  if (window.innerWidth < 600){
-    buttons.forEach(button => {
-    button.style.display = 'none';
-    button.style.fontSize = '18px';
-    button.style.margin = '0';
-    document.getElementById('hideShowBtn').style.display = 'block'
-    });
-    menu.style.width = '20px';
-    menu.style.height = '22px';
+    const rootIdx = chromatic.indexOf(root);
+    if (fromIdx === -1 || toIdx === -1 || rootIdx === -1) return chord;
+
+    const shift = (toIdx - fromIdx + 12) % 12;
+    const newIndex = (rootIdx + shift) % 12;
+    const newRoot = chromatic[newIndex];
+
+    if (nashvilleMode) {
+      const nashvilleNumbersSharps = ['1', '1#', '2', '2#', '3', '4', '4#', '5', '5#', '6', '6#', '7'];
+      const nashvilleNumbersFlats  = ['1', '2b', '2', '3b', '3', '4', '5b', '5', '6b', '6', '7b', '7'];
+
+      let keyIdx = chromatic.indexOf(toKey);
+      if (keyIdx === -1) keyIdx = chromatic.indexOf(fromKey);
+      const relIdx = (chromatic.indexOf(newRoot) - keyIdx + 12) % 12;
+      const nashNum = useFlats ? nashvilleNumbersFlats[relIdx] : nashvilleNumbersSharps[relIdx];
+
+      return nashNum + suffix;
+    }
+
+    return newRoot + suffix;
   }
 
-  // Left Container
-  const leftContainer = document.querySelector('.leftContainer');
-  leftContainer.innerHTML = ''; // Clear previous content
+  function getMajorScale(key) {
+    const semitoneMap = {
+      C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3,
+      E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8,
+      A: 9, 'A#': 10, Bb: 10, B: 11,
+    };
 
-  const liveTitle = document.createElement('div');
-  liveTitle.className = 'liveTitle';
-  liveTitle.textContent = 'Live Song ▼';
-  leftContainer.appendChild(liveTitle);
+    const sharpScale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const steps = [0, 2, 4, 5, 7, 9, 11]; // Major scale intervals in semitones
 
-  const liveContainer = document.createElement('div');
-  liveContainer.className = 'liveContainer';
-  leftContainer.appendChild(liveContainer);
+    const startIndex = semitoneMap[key];
+    if (startIndex === undefined) return ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 
-  // Always show the liveContainer when rendering UI
-  liveContainer.style.display = 'block';
-
-  // Use the static dropdown-menu if it exists, otherwise create it
-  let dropdownMenu = document.querySelector('.dropdown-menu');
-  if (!dropdownMenu) {
-    dropdownMenu = document.createElement('ul');
-    dropdownMenu.className = 'dropdown-menu';
-    liveContainer.appendChild(dropdownMenu);
+    return steps.map(step => sharpScale[(startIndex + step) % 12]);
   }
-  dropdownMenu.innerHTML = ''; // Clear previous content
+  function convertToNashville(chord, key) {
+    const scale = getMajorScale(key);
+    const match = chord.match(/^([A-G][#b]?)(.*)?$/);
+    if (!match) return chord;
 
-  liveSongs.forEach(songName => {
-    const li = document.createElement('li');
-    li.className = 'songName';
-    li.textContent = songName;
-    dropdownMenu.appendChild(li);
+    const [ , root, suffix ] = match;
+    const index = scale.indexOf(root);
+    if (index === -1) return chord;
 
-    // Add click event to each song name
-    li.addEventListener('click', function() {
-      localStorage.setItem(`currentSongTitle_${currentUser}`, songName);
-      if (title) title.textContent = songName; // Update the title
-      liveContainer.style.display = 'none'; // Hide the dropdown after selection
-      const rightContainer = document.querySelector('.rightContainer');
-      if (rightContainer) rightContainer.innerHTML = `<div class="chordsContainer"></div>`;
-
-      saveData(); // Save the current song title
-      renderUI(); // Re-render UI to reflect changes
-    });
-
-    // Remove live songs from localStorage on right-click
-    li.addEventListener('contextmenu', async function(e) {
-      e.preventDefault();
-      // Remove the right-clicked song from the liveSongs array
-      liveSongs = liveSongs.filter(name => name !== songName);
-
-      // Remove this song from liveSongsData
-      delete liveSongsData[songName];
-      // Remove the song from the dropdown menu
-      li.remove();
-      await saveData(); // Save the updated liveSongs and liveSongsData
-    });
-
-    li.addEventListener('touchstart', async function (e) {
-      // Start the timer
-      e.preventDefault();
-      holdTimeout = setTimeout(() => {
-        // Remove the right-clicked song from the liveSongs array
-        liveSongs = liveSongs.filter(name => name !== songName);
-
-        // Remove this song from liveSongsData
-        delete liveSongsData[songName];
-        // Remove the song from the dropdown menu
-        li.remove();
-      }, holdTapThreshold);
-      await saveData(); // Save the updated liveSongs and liveSongsData
-    });
-
-    li.addEventListener('touchend', function () {
-      // Cancel if released early
-      clearTimeout(holdTimeout);
-    });
-
-    li.addEventListener('touchmove', function () {
-      // Cancel if they move finger
-      clearTimeout(holdTimeout);
-    });
-  });
-
-  let title = document.querySelector('.title');
+    return (index + 1).toString() + (suffix || '');
+  }
 
 
-  // Double-click to display all live songs and set the title
-  liveTitle.addEventListener('dblclick', function() {
-    localStorage.setItem(`openMapForSong_${currentUser}`, null);
-    showAllLiveSongsAndSections();
-  });
+  function transposeChordLine(line, fromKey, toKey) {
+    const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
 
-  let holdTimeout = null;
-  // Hold-Tap to display all live songs and set the title
-  liveTitle.addEventListener('touchstart', function () {
-    // Start the timer
-    holdTimeout = setTimeout(() => {
-      // If the user holds long enough, do this:
-      localStorage.setItem(`openMapForSong_${currentUser}`, null);
-      document.querySelector('.title').style.display = 'none';
-      showAllLiveSongsAndSections();
-    }, holdTapThreshold);
-  });
+    return line
+    .split(/(\s+|·+)/) // split by space OR dot, keep separators
+    .map(part => {
+      const trimmed = part.trimStart();
 
-  liveTitle.addEventListener('touchend', function () {
-    // Cancel if released early
-    clearTimeout(holdTimeout);
-  });
+      // In Nashville mode, skip numbers like "1", "1/3", "6b", etc.
+      if (nashvilleMode && /^[1-7](b|#)?(\/[1-7](b|#)?)?$/.test(trimmed)) {
+        return part;
+      }
 
-  liveTitle.addEventListener('touchmove', function () {
-    // Cancel if they move finger
-    clearTimeout(holdTimeout);
-  });
+      // Detect slash chords like D/F# or C#m7/G
+      if (trimmed.includes('/')) {
+        const [chordPart, bassPart] = trimmed.split('/');
+        const transposedChord = /^[A-G][b#♭]?/.test(chordPart)
+          ? transposeChord(chordPart, fromKey, toKey)
+          : chordPart;
+        const transposedBass = /^[A-G][b#♭]?/.test(bassPart)
+          ? transposeChord(bassPart, fromKey, toKey)
+          : bassPart;
+        return transposedChord + '/' + transposedBass;
+      }
 
-  
-  function showAllLiveSongsAndSections() {
+      // Normal chords (not slash)
+      if (/^[A-G][b#♭]?/.test(trimmed)) {
+        return transposeChord(trimmed, fromKey, toKey);
+      }
+      return part;
+    })
+    .join('');
+  }
+
+function showAllLiveSongsAndSections() {
     const rightContainer = document.querySelector('.rightContainer');
     rightContainer.innerHTML = "";
 
@@ -440,8 +358,6 @@ function renderUI() {
           .map(p => p.textContent.trim());
 
           songObj.songMap = reorderedParts;
-
-          liveSongsData[songObj.name] = songObj;
           await saveData(); // Save the updated liveSongsData
         });
 
@@ -510,7 +426,6 @@ function renderUI() {
           .map(p => p.textContent.trim());
 
           songObj.songMap = reorderedParts;
-          liveSongsData[songObj.name] = songObj;
           await saveData(); // Save the updated liveSongsData
       }
     }
@@ -969,8 +884,349 @@ function renderUI() {
       liveRightContainer.innerHTML = '<div align="center">No Live Songs Selected.</div>';
     }
   }
+function renderLeftContainer() {
+  // Left Container
+  const leftContainer = document.querySelector('.leftContainer');
+  leftContainer.innerHTML = ''; // Clear previous content
+
+  const liveTitle = document.createElement('div');
+  liveTitle.className = 'liveTitle';
+  liveTitle.textContent = 'Live Song ▼';
+  leftContainer.appendChild(liveTitle);
+
+  const liveContainer = document.createElement('div');
+  liveContainer.className = 'liveContainer';
+  leftContainer.appendChild(liveContainer);
+
+  // Always show the liveContainer when rendering UI
+  liveContainer.style.display = 'block';
+
+  // Use the static dropdown-menu if it exists, otherwise create it
+  let dropdownMenu = document.querySelector('.dropdown-menu');
+  if (!dropdownMenu) {
+    dropdownMenu = document.createElement('ul');
+    dropdownMenu.className = 'dropdown-menu';
+    liveContainer.appendChild(dropdownMenu);
+  }
+  dropdownMenu.innerHTML = ''; // Clear previous content
+
+  liveSongs.forEach(songName => {
+    const li = document.createElement('li');
+    li.className = 'songName';
+    li.textContent = songName;
+    dropdownMenu.appendChild(li);
+
+    // Add click event to each song name
+    li.addEventListener('click', function() {
+      localStorage.setItem(`currentSongTitle_${currentUser}`, songName);
+      if (title) title.textContent = songName; // Update the title
+      liveContainer.style.display = 'none'; // Hide the dropdown after selection
+      const rightContainer = document.querySelector('.rightContainer');
+      if (rightContainer) rightContainer.innerHTML = `<div class="chordsContainer"></div>`;
+
+      saveData(); // Save the current song title
+      renderUI(); // Re-render UI to reflect changes
+    });
+
+    // Remove live songs from localStorage on right-click
+    li.addEventListener('contextmenu', async function(e) {
+      e.preventDefault();
+      // Remove the right-clicked song from the liveSongs array
+      liveSongs = liveSongs.filter(name => name !== songName);
+
+      // Remove this song from liveSongsData
+      delete liveSongsData[songName];
+      // Remove the song from the dropdown menu
+      li.remove();
+      await saveData(); // Save the updated liveSongs and liveSongsData
+    });
+
+    li.addEventListener('touchstart', async function (e) {
+      // Start the timer
+      e.preventDefault();
+      holdTimeout = setTimeout(() => {
+        // Remove the right-clicked song from the liveSongs array
+        liveSongs = liveSongs.filter(name => name !== songName);
+
+        // Remove this song from liveSongsData
+        delete liveSongsData[songName];
+        // Remove the song from the dropdown menu
+        li.remove();
+      }, holdTapThreshold);
+      await saveData(); // Save the updated liveSongs and liveSongsData
+    });
+
+    li.addEventListener('touchend', function () {
+      // Cancel if released early
+      clearTimeout(holdTimeout);
+    });
+
+    li.addEventListener('touchmove', function () {
+      // Cancel if they move finger
+      clearTimeout(holdTimeout);
+    });
+  });
+
+  let title = document.querySelector('.title');
 
 
+  // Double-click to display all live songs and set the title
+  liveTitle.addEventListener('dblclick', function() {
+    localStorage.setItem(`openMapForSong_${currentUser}`, null);
+    showAllLiveSongsAndSections();
+  });
+
+  let holdTimeout = null;
+  // Hold-Tap to display all live songs and set the title
+  liveTitle.addEventListener('touchstart', function () {
+    // Start the timer
+    holdTimeout = setTimeout(() => {
+      // If the user holds long enough, do this:
+      localStorage.setItem(`openMapForSong_${currentUser}`, null);
+      document.querySelector('.title').style.display = 'none';
+      showAllLiveSongsAndSections();
+    }, holdTapThreshold);
+  });
+
+  liveTitle.addEventListener('touchend', function () {
+    // Cancel if released early
+    clearTimeout(holdTimeout);
+  });
+
+  liveTitle.addEventListener('touchmove', function () {
+    // Cancel if they move finger
+    clearTimeout(holdTimeout);
+  });
+
+  // Add event listener to liveTitle to toggle dropdown
+  liveTitle.addEventListener('click', function() {
+    dropdownMenu.classList.toggle('show');
+  });
+}
+
+// --- Data Model and Persistence ---
+firebase.auth().onAuthStateChanged(async (user) => {
+  if (!user) {
+    window.location.href = "index.html"; // Redirect to login if not authenticated
+    return;
+  }
+
+  currentUser = user.uid; // Set currentUser UID
+
+  try {
+    const doc = await firebase.firestore().collection('users').doc(currentUser).get();
+
+    // Dark mode loading
+    if (doc.exists) {
+      const userData = doc.data();
+      appData = userData.appData || []; // Load appData into your global variable
+      liveSongs = userData.liveSongs || []; // Load liveSongs into your global variable
+      liveSongsData = userData.liveSongsData || {}; // Load liveSongsData into your global variable
+      const isDarkMode = userData.darkMode === true; // Load darkMode state
+
+      const darkBtn = document.querySelector('#darkBtn');
+
+      if (isDarkMode) {
+        document.body.classList.add('dark-mode');
+        darkBtn.textContent = '☼';
+      }
+      else {
+        document.body.classList.remove('dark-mode');
+        darkBtn.textContent = '☾⋆';
+      }
+    } 
+    else {
+      appData = []; // Default to empty array if no user data found
+      liveSongs = []; // Default to empty array if no live songs found
+      document.body.classList.remove('dark-mode'); // Default to light mode if no data
+    }
+
+    // --- CHECK LIVE SECTION FLAG HERE ---
+    const liveSection = localStorage.getItem(`liveSection_${currentUser}`) === 'true';
+    if (liveSection) {
+      localStorage.setItem(`liveSection_${currentUser}`, 'false');
+      showAllLiveSongsAndSections();
+      renderLeftContainer(); // Only redraw the left side
+      localStorage.setItem(`openMapForSong_${currentUser}`, null);
+      return; // Prevents double UI render
+    }
+
+    renderUI(); // Render UI after all data (appData and dark mode) is loaded
+    document.body.classList.remove('loading'); // Remove loading class to show content
+  } 
+  catch (error) {
+    console.error("Error loading user data from Firestore:", error);
+    // Potentially redirect to an error page or show a user-friendly message
+  }
+});
+
+
+// Save data to Firestore
+async function saveData() {
+  if (!currentUser) { // Ensure currentUser is available
+    console.error("User not logged in, cannot save data.");
+    return;
+  }
+  // Add a defensive check here to ensure appData is an array before saving
+  if (!Array.isArray(appData)) {
+      console.error("appData is not an array, cannot save:", appData);
+      appData = []; // Reset to empty array to prevent future errors
+  }
+
+  try {
+    await firebase.firestore().collection('users').doc(currentUser).set({
+      appData: appData, // THIS refers to the global `appData` variable
+      liveSongs: liveSongs,
+      liveSongsData: liveSongsData
+    }, { merge: true });  
+  } 
+  catch (error) {
+    console.error("Error saving app data to Firestore:", error);
+  }
+}
+
+
+window.keyList = [
+  'A', 'A#', 'Bb', 'B', 'C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'Num'
+];
+
+let nextChordFocus = null; // To track the next chord to focus after editing
+let nextSongMapFocusIdx = null; // To track the next song map part to focus after editing
+
+localStorage.setItem(`nashvilleMode_${currentUser}`, 'false');
+
+// --- UI Rendering ---
+function renderUI() {
+  let lastTap = 0;
+  const dblTapThreshold = 300; // max ms between taps to count as double-tap
+  const holdTapThreshold = 350; // min ms time to count as hold tap
+
+  const buttons = document.querySelectorAll('.menuBtn');
+  const menu = document.querySelector('.menu');
+
+  if (window.innerWidth < 600){
+    buttons.forEach(button => {
+    button.style.display = 'none';
+    button.style.fontSize = '18px';
+    button.style.margin = '0';
+    document.getElementById('hideShowBtn').style.display = 'block'
+    });
+    menu.style.width = '20px';
+    menu.style.height = '22px';
+  }
+
+  // Left Container
+  const leftContainer = document.querySelector('.leftContainer');
+  leftContainer.innerHTML = ''; // Clear previous content
+
+  const liveTitle = document.createElement('div');
+  liveTitle.className = 'liveTitle';
+  liveTitle.textContent = 'Live Song ▼';
+  leftContainer.appendChild(liveTitle);
+
+  const liveContainer = document.createElement('div');
+  liveContainer.className = 'liveContainer';
+  leftContainer.appendChild(liveContainer);
+
+  // Always show the liveContainer when rendering UI
+  liveContainer.style.display = 'block';
+
+  // Use the static dropdown-menu if it exists, otherwise create it
+  let dropdownMenu = document.querySelector('.dropdown-menu');
+  if (!dropdownMenu) {
+    dropdownMenu = document.createElement('ul');
+    dropdownMenu.className = 'dropdown-menu';
+    liveContainer.appendChild(dropdownMenu);
+  }
+  dropdownMenu.innerHTML = ''; // Clear previous content
+
+  liveSongs.forEach(songName => {
+    const li = document.createElement('li');
+    li.className = 'songName';
+    li.textContent = songName;
+    dropdownMenu.appendChild(li);
+
+    // Add click event to each song name
+    li.addEventListener('click', function() {
+      localStorage.setItem(`currentSongTitle_${currentUser}`, songName);
+      if (title) title.textContent = songName; // Update the title
+      liveContainer.style.display = 'none'; // Hide the dropdown after selection
+      const rightContainer = document.querySelector('.rightContainer');
+      if (rightContainer) rightContainer.innerHTML = `<div class="chordsContainer"></div>`;
+
+      saveData(); // Save the current song title
+      renderUI(); // Re-render UI to reflect changes
+    });
+
+    // Remove live songs from localStorage on right-click
+    li.addEventListener('contextmenu', async function(e) {
+      e.preventDefault();
+      // Remove the right-clicked song from the liveSongs array
+      liveSongs = liveSongs.filter(name => name !== songName);
+
+      // Remove this song from liveSongsData
+      delete liveSongsData[songName];
+      // Remove the song from the dropdown menu
+      li.remove();
+      await saveData(); // Save the updated liveSongs and liveSongsData
+    });
+
+    li.addEventListener('touchstart', async function (e) {
+      // Start the timer
+      e.preventDefault();
+      holdTimeout = setTimeout(() => {
+        // Remove the right-clicked song from the liveSongs array
+        liveSongs = liveSongs.filter(name => name !== songName);
+
+        // Remove this song from liveSongsData
+        delete liveSongsData[songName];
+        // Remove the song from the dropdown menu
+        li.remove();
+      }, holdTapThreshold);
+      await saveData(); // Save the updated liveSongs and liveSongsData
+    });
+
+    li.addEventListener('touchend', function () {
+      // Cancel if released early
+      clearTimeout(holdTimeout);
+    });
+
+    li.addEventListener('touchmove', function () {
+      // Cancel if they move finger
+      clearTimeout(holdTimeout);
+    });
+  });
+
+  let title = document.querySelector('.title');
+
+
+  // Double-click to display all live songs and set the title
+  liveTitle.addEventListener('dblclick', function() {
+    localStorage.setItem(`openMapForSong_${currentUser}`, null);
+    showAllLiveSongsAndSections();
+  });
+
+  let holdTimeout = null;
+  // Hold-Tap to display all live songs and set the title
+  liveTitle.addEventListener('touchstart', function () {
+    // Start the timer
+    holdTimeout = setTimeout(() => {
+      // If the user holds long enough, do this:
+      localStorage.setItem(`openMapForSong_${currentUser}`, null);
+      document.querySelector('.title').style.display = 'none';
+      showAllLiveSongsAndSections();
+    }, holdTapThreshold);
+  });
+
+  liveTitle.addEventListener('touchend', function () {
+    // Cancel if released early
+    clearTimeout(holdTimeout);
+  });
+
+  liveTitle.addEventListener('touchmove', function () {
+    // Cancel if they move finger
+    clearTimeout(holdTimeout);
+  });
 
   // Add event listener to liveTitle to toggle dropdown
   liveTitle.addEventListener('click', function() {
@@ -1110,18 +1366,34 @@ function renderUI() {
       else if (key === 'Num' && localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true'){
         keyBtn.classList.add('selectedNumKey');
       }
-      keyBtn.addEventListener('click', function() {
+      // Desktop click event
+      keyBtn.addEventListener('click', async function() {
         if (currentSongObj) {
           if (keyBtn.textContent === 'Num'){
             const current = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
             localStorage.setItem(`nashvilleMode_${currentUser}`, (!current).toString());
-            renderUI();
           }
           else{
             currentSongObj.currentKey = key; // Store the selected key
           }
-          saveData();
-          renderUI();
+          await saveData();
+          renderUI(); // Re-render the UI to reflect the new key
+        }
+      });
+
+      // Mobile touch event
+      keyBtn.addEventListener('touchstart', async function(e) {
+        e.preventDefault(); // Prevent default touch behavior
+        if (currentSongObj) {
+          if (keyBtn.textContent === 'Num'){
+            const current = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
+            localStorage.setItem(`nashvilleMode_${currentUser}`, (!current).toString());
+          }
+          else{
+            currentSongObj.currentKey = key; // Store the selected key
+          }
+          await saveData();
+          renderUI(); // Re-render the UI to reflect the new key
         }
       });
       keyContainer.appendChild(keyBtn);
@@ -1129,139 +1401,6 @@ function renderUI() {
 
     const rightContainer = document.querySelector('.rightContainer');
     rightContainer.insertBefore(keyContainer, container); // Insert above chordsContainer
-  }
-  
-  function transposeChord(chord, fromKey, toKey) {
-    const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
-
-    // Chromatic scales
-    const chromaticSharps = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-    const chromaticFlats  = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
-
-    function usesFlat(note) {
-      return note.includes('b') || note.includes('♭');
-    }
-
-    chord = chord.replace('♭', 'b');
-    fromKey = fromKey.replace('♭', 'b');
-    toKey = toKey.replace('♭', 'b');
-
-    // Convert Nashville number (e.g. "6b", "4#", etc.) to letter chord before continuing
-    const numberMatch = chord.match(/^([1-7])([b#]?)(.*)$/);
-    if (numberMatch) {
-      const [ , number, accidental, suffix ] = numberMatch;
-      const numberIndex = parseInt(number, 10) - 1;
-      const scaleSemitones = [0, 2, 4, 5, 7, 9, 11];
-      const sharpScale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-
-      const baseSemitone = scaleSemitones[numberIndex];
-      let finalSemitone = baseSemitone;
-
-      if (accidental === '#') finalSemitone = (baseSemitone + 1) % 12;
-      if (accidental === 'b') finalSemitone = (baseSemitone + 11) % 12;
-
-      const chordRoot = sharpScale[finalSemitone];
-
-      chord = chordRoot + (suffix || '');
-    }
-
-    const match = chord.match(/^([A-G][b#]?)(.*)$/);
-    if (!match) return chord;
-
-    let [ , root, suffix ] = match;
-    const useFlats = usesFlat(root) || usesFlat(toKey);
-    const chromatic = useFlats ? chromaticFlats : chromaticSharps;
-
-    const fromIdx = chromaticSharps.indexOf(fromKey) !== -1
-      ? chromaticSharps.indexOf(fromKey)
-      : chromaticFlats.indexOf(fromKey);
-
-    const toIdx = chromaticSharps.indexOf(toKey) !== -1
-      ? chromaticSharps.indexOf(toKey)
-      : chromaticFlats.indexOf(toKey);
-
-    const rootIdx = chromatic.indexOf(root);
-    if (fromIdx === -1 || toIdx === -1 || rootIdx === -1) return chord;
-
-    const shift = (toIdx - fromIdx + 12) % 12;
-    const newIndex = (rootIdx + shift) % 12;
-    const newRoot = chromatic[newIndex];
-
-    if (nashvilleMode) {
-      const nashvilleNumbersSharps = ['1', '1#', '2', '2#', '3', '4', '4#', '5', '5#', '6', '6#', '7'];
-      const nashvilleNumbersFlats  = ['1', '2b', '2', '3b', '3', '4', '5b', '5', '6b', '6', '7b', '7'];
-
-      let keyIdx = chromatic.indexOf(toKey);
-      if (keyIdx === -1) keyIdx = chromatic.indexOf(fromKey);
-      const relIdx = (chromatic.indexOf(newRoot) - keyIdx + 12) % 12;
-      const nashNum = useFlats ? nashvilleNumbersFlats[relIdx] : nashvilleNumbersSharps[relIdx];
-
-      return nashNum + suffix;
-    }
-
-    return newRoot + suffix;
-  }
-
-  function getMajorScale(key) {
-    const semitoneMap = {
-      C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3,
-      E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8,
-      A: 9, 'A#': 10, Bb: 10, B: 11,
-    };
-
-    const sharpScale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-    const steps = [0, 2, 4, 5, 7, 9, 11]; // Major scale intervals in semitones
-
-    const startIndex = semitoneMap[key];
-    if (startIndex === undefined) return ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
-
-    return steps.map(step => sharpScale[(startIndex + step) % 12]);
-  }
-  function convertToNashville(chord, key) {
-    const scale = getMajorScale(key);
-    const match = chord.match(/^([A-G][#b]?)(.*)?$/);
-    if (!match) return chord;
-
-    const [ , root, suffix ] = match;
-    const index = scale.indexOf(root);
-    if (index === -1) return chord;
-
-    return (index + 1).toString() + (suffix || '');
-  }
-
-
-  function transposeChordLine(line, fromKey, toKey) {
-    const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
-
-    return line
-    .split(/(\s+|·+)/) // split by space OR dot, keep separators
-    .map(part => {
-      const trimmed = part.trimStart();
-
-      // In Nashville mode, skip numbers like "1", "1/3", "6b", etc.
-      if (nashvilleMode && /^[1-7](b|#)?(\/[1-7](b|#)?)?$/.test(trimmed)) {
-        return part;
-      }
-
-      // Detect slash chords like D/F# or C#m7/G
-      if (trimmed.includes('/')) {
-        const [chordPart, bassPart] = trimmed.split('/');
-        const transposedChord = /^[A-G][b#♭]?/.test(chordPart)
-          ? transposeChord(chordPart, fromKey, toKey)
-          : chordPart;
-        const transposedBass = /^[A-G][b#♭]?/.test(bassPart)
-          ? transposeChord(bassPart, fromKey, toKey)
-          : bassPart;
-        return transposedChord + '/' + transposedBass;
-      }
-
-      // Normal chords (not slash)
-      if (/^[A-G][b#♭]?/.test(trimmed)) {
-        return transposeChord(trimmed, fromKey, toKey);
-      }
-      return part;
-    })
-    .join('');
   }
 
   // Chord Sections Display
@@ -2026,4 +2165,3 @@ document.addEventListener('touchstart', function (e) {
 function manual(){
   window.location.href = 'manual.html';
 }
-
