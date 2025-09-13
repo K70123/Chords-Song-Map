@@ -80,6 +80,10 @@ button{
 #darkBtn{
   left: 30%;
 }
+#changePasswordBtn{
+  left: 50%;
+  transform: translate(-50%, 0);
+}
 #logOut{
   right: 30%;
 }
