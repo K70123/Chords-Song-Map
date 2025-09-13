@@ -594,3 +594,27 @@ function logOut() {
     alert("Error signing out: " + error.message);
   });
 }
+
+document.getElementById('changePasswordBtn').addEventListener('click', async function() {
+  const newPassword = prompt("Enter your new password:");
+  if (!newPassword) {
+    alert("Password change cancelled.");
+    return;
+  }
+
+  const user = firebase.auth().currentUser;
+  if (user) {
+    try {
+      await user.updatePassword(newPassword);
+      alert("Password updated successfully!");
+    } catch (error) {
+      if (error.code === 'auth/requires-recent-login') {
+        alert("Please log out and log in again before changing your password.");
+      } else {
+        alert("Error updating password: " + error.message);
+      }
+    }
+  } else {
+    alert("No user is currently logged in.");
+  }
+});
