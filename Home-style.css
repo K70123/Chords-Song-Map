@@ -222,7 +222,7 @@ body {
   width: 48px;
 }
 #logOut{
-  right: 28%;
+  right: 16%;
   width: 55px;
 }
 #addArtistBtn {
@@ -261,3 +261,4 @@ a {
   padding: 1px 1px;
 }
 }
+
