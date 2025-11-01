@@ -294,19 +294,31 @@ function showAllLiveSongsAndSections() {
             document.execCommand('selectAll', false, null);
             nextChordFocus = null;
           });
-          // Double tap to show the artist name edit button
+          // Double tap to edit the songmap part (touch)
           part.addEventListener('touchend', function () {
-            const currentTime = new Date().getTime();
-            const tapLength = currentTime - lastTap;
+            const currentTime = Date.now();
+            const prevTap = part._lastTap || 0;
+            const tapLength = currentTime - prevTap;
 
-            if (tapLength < dblTapThreshold && tapLength > 0) {
+            if (tapLength < 300 && tapLength > 0) { // use local threshold
               part.contentEditable = true;
               part.focus();
-              // Select all text of the part
-              document.execCommand('selectAll', false, null);
+              // Select all text of the part using modern Selection/Range API
+              try {
+                const range = document.createRange();
+                range.selectNodeContents(part);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+              } catch (err) {
+                // Fallback for very old environments (execCommand is deprecated)
+                if (document.execCommand) {
+                  document.execCommand('selectAll', false, null);
+                }
+              }
               nextChordFocus = null;
             }
-            lastTap = currentTime;
+            part._lastTap = currentTime;
           });
 
             part.addEventListener('keydown', function(e) {
