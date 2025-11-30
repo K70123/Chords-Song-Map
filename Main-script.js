@@ -26,6 +26,121 @@ let liveSongsData = {};
 let beatsPerBar = 4;
 let chordsPerRow = 6;
 
+let lastTap = 0;
+const dblTapThreshold = 300; // max ms between taps to count as double-tap
+const holdTapThreshold = 350; // min ms time to count as hold tap
+
+// --- Undo / Redo History Manager ---
+let undoStack = [];
+let redoStack = [];
+const HISTORY_LIMIT = 60;
+let isApplyingHistory = false;
+
+// Create a deep snapshot of the application state we want to restore
+function createSnapshot() {
+  return {
+    appData: JSON.parse(JSON.stringify(appData || [])),
+    liveSongs: JSON.parse(JSON.stringify(liveSongs || [])),
+    liveSongsData: JSON.parse(JSON.stringify(liveSongsData || {})),
+    currentSongTitle: currentUser ? localStorage.getItem(`currentSongTitle_${currentUser}`) : null
+  };
+}
+
+// Record current state on the undo stack (call BEFORE making a change)
+function recordState() {
+  // don't record while applying an undo/redo
+  if (isApplyingHistory || !currentUser) return;
+  const snap = createSnapshot();
+  undoStack.push(snap);
+  if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+  // clear redo stack on a new action
+  redoStack = [];
+}
+
+// Internal: apply a snapshot and persist it. set save to Firestore and re-render.
+async function applySnapshot(snapshot) {
+  if (!snapshot) return;
+  // detect if user is currently viewing the live UI so we can restore it after applying snapshot
+  const wasLiveView = !!document.querySelector('.liveRightContainer') || !!document.querySelector('.liveSongMapContainer');
+
+  isApplyingHistory = true;
+  appData = snapshot.appData || [];
+  liveSongs = snapshot.liveSongs || [];
+  liveSongsData = snapshot.liveSongsData || {};
+  if (currentUser && snapshot.currentSongTitle !== null) {
+    localStorage.setItem(`currentSongTitle_${currentUser}`, snapshot.currentSongTitle);
+  }
+  // persist to Firestore without recording history
+  try {
+    if (currentUser) {
+      await firebase.firestore().collection('users').doc(currentUser).set({
+        appData: appData,
+        liveSongs: liveSongs,
+        liveSongsData: liveSongsData
+      }, { merge: true });
+    }
+  } catch (err) {
+    console.error('Error applying snapshot:', err);
+  }
+
+  // render main UI and restore live view if the user had it open
+  renderUI();
+  if (wasLiveView) {
+    // show live songs & ensure left container is up to date
+    try {
+      showAllLiveSongsAndSections();
+    } catch (e) {
+      // in case showAllLiveSongsAndSections isn't available yet, still call renderLeftContainer
+      console.warn('showAllLiveSongsAndSections failed during undo/redo restore:', e);
+    }
+    if (typeof renderLeftContainer === 'function') {
+      renderLeftContainer();
+    }
+  }
+
+  isApplyingHistory = false;
+}
+
+// Public undo/redo functions
+async function undo() {
+  if (undoStack.length === 0) return;
+  // push current state to redo stack
+  const current = createSnapshot();
+  redoStack.push(current);
+  const snap = undoStack.pop();
+  await applySnapshot(snap);
+}
+async function redo() {
+  if (redoStack.length === 0) return;
+  const current = createSnapshot();
+  undoStack.push(current);
+  const snap = redoStack.pop();
+  await applySnapshot(snap);
+}
+
+// Expose to window for buttons or manual calls
+window.recordState = recordState;
+window.undo = undo;
+window.redo = redo;
+
+// Keyboard shortcuts (Ctrl/Cmd+Z and Ctrl/Cmd+Y / Ctrl+Shift+Z)
+document.addEventListener('keydown', function (e) {
+  const meta = e.ctrlKey || e.metaKey;
+  if (!meta) return;
+  if (e.key.toLowerCase() === 'z') {
+    e.preventDefault();
+    // if Shift is pressed use redo (Cmd/Ctrl+Shift+Z)
+    if (e.shiftKey) {
+      redo();
+    } else {
+      undo();
+    }
+  } else if (e.key.toLowerCase() === 'y') {
+    e.preventDefault();
+    redo();
+  }
+});
+
 function transposeChord(chord, fromKey, toKey) {
     const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
 
@@ -188,24 +303,28 @@ function showAllLiveSongsAndSections() {
   liveSongs.forEach(songName => {
     let songObj = null;
     let originalSongObj = null;
-    for (const artist of appData) {
-      originalSongObj = artist.songs.find(song => song.name === songName);
-      if (originalSongObj) {
-        // Always refresh the live copy from the original when showing live songs
-        if (liveSongsData[songName]) {
-          songObj = liveSongsData[songName]; // Use the live copy
-        } 
-        else {
+
+    // Prefer an existing live copy (saved previously)
+    if (liveSongsData && liveSongsData[songName]) {
+      songObj = liveSongsData[songName];
+    } else {
+      // else try to find the original in appData and create a live copy from it
+      for (const artist of appData) {
+        originalSongObj = artist.songs.find(song => song.name === songName);
+        if (originalSongObj) {
           songObj = JSON.parse(JSON.stringify(originalSongObj));
-          liveSongsData[songName] = songObj; // Only copy if not already present
+          liveSongsData[songName] = songObj;
+          break;
         }
-        break;
       }
     }
-    if (!songObj){
-      console.warn(`Live song "${songName}" not found in appData. It might have been deleted.`);
-      return;
+
+    // if neither original nor live copy exist, skip but warn
+    if (!songObj) {
+      console.warn(`Live song "${songName}" not found (no original and no live copy). Skipping.`);
+      return; // continue with next live song
     }
+
     // --- Restore focus on nextChord or nextSongMapPart in live view ---
     setTimeout(() => {
       if (nextChordFocus) {
@@ -288,6 +407,7 @@ function showAllLiveSongsAndSections() {
         const songMapParts = songMapList.querySelectorAll('.songMapPart');
         songMapParts.forEach(part => {
           part.addEventListener('dblclick', function (e) {
+            recordState();
             e.preventDefault();
             part.contentEditable = true;
             part.focus();
@@ -296,6 +416,7 @@ function showAllLiveSongsAndSections() {
           });
           // Double tap to edit the songmap part (touch)
           part.addEventListener('touchend', function () {
+            recordState();
             const currentTime = Date.now();
             const prevTap = part._lastTap || 0;
             const tapLength = currentTime - prevTap;
@@ -323,6 +444,7 @@ function showAllLiveSongsAndSections() {
 
             part.addEventListener('keydown', function(e) {
               if (e.key === 'Enter') {
+                recordState();
                 e.preventDefault();
                 const allParts = Array.from(document.querySelectorAll('.songMapPart'));
                 const idx = allParts.indexOf(part);
@@ -336,6 +458,7 @@ function showAllLiveSongsAndSections() {
             });
 
           part.addEventListener('blur', async function () {
+            recordState();
             part.contentEditable = false;
             const allParts = Array.from(songMapList.querySelectorAll('.songMapPart'));
             const idx = allParts.indexOf(part);
@@ -359,11 +482,13 @@ function showAllLiveSongsAndSections() {
         part.setAttribute('draggable', 'true');
 
         part.addEventListener('dragstart', function(e) {
+          recordState();
           e.dataTransfer.effectAllowed = 'move';
           part.classList.add('dragging');
           window.draggedPart = part;
         });
         part.addEventListener('dragend', async function() {
+          recordState();
           part.classList.remove('dragging');
           window.draggedPart = null;
           const reorderedParts = Array.from(songMapList.querySelectorAll('.songMapPart'))
@@ -376,6 +501,7 @@ function showAllLiveSongsAndSections() {
         // --- Mobile: touch-based drag ---
         let startY = 0;
         part.addEventListener('touchstart', function (e) {
+          recordState();
           e.preventDefault();
           window.draggedPart = part;
           part.classList.add('dragging');
@@ -383,6 +509,7 @@ function showAllLiveSongsAndSections() {
         });
 
         part.addEventListener('touchmove', function (e) {
+          recordState();
           e.preventDefault();
           const touchY = e.touches[0].clientY;
           const afterElement = getDragAfterElement(songMapList, touchY);
@@ -395,6 +522,7 @@ function showAllLiveSongsAndSections() {
         });
 
         part.addEventListener('touchend', function () {
+          recordState();
           const dragging = document.querySelector('.dragging');
           if (dragging) {
             dragging.classList.remove('dragging');
@@ -406,6 +534,7 @@ function showAllLiveSongsAndSections() {
 
       // --- Desktop Dragover ---
       songMapList.addEventListener('dragover', function(e) {
+        recordState();
         e.preventDefault();
         const dragging = document.querySelector('.dragging');
         if (!dragging) return;
@@ -434,6 +563,7 @@ function showAllLiveSongsAndSections() {
 
       // --- Save the new order ---
       async function saveSongMapOrder() {
+        recordState();
         const reorderedParts = Array.from(songMapList.querySelectorAll('.songMapPart'))
           .map(p => p.textContent.trim());
 
@@ -535,6 +665,7 @@ function showAllLiveSongsAndSections() {
 
       chordsContainer.querySelector('.beatSpan').ondblclick = function(e) {
         e.preventDefault();
+        recordState();
         const newBeatSpan = prompt('Enter The New Beats Per Bar:');
         if (newBeatSpan !== "") {
           songObj.beatsPerBar = newBeatSpan;
@@ -542,11 +673,13 @@ function showAllLiveSongsAndSections() {
           showAllLiveSongsAndSections();
         }
       }
+
       // Set the original key on hold tap
       chordsContainer.querySelector('.beatSpan').addEventListener('touchstart', function (e) {
         // Start the timer
         e.preventDefault();
         holdTimeout = setTimeout(() => {
+          recordState();
           const newBeatSpan = prompt('Enter The New Beats Per Bar');
           if (newBeatSpan !== "") {
             songObj.beatsPerBar = newBeatSpan;
@@ -559,7 +692,6 @@ function showAllLiveSongsAndSections() {
         // Cancel if released early
         clearTimeout(holdTimeout);
       });
-
       chordsContainer.querySelector('.beatSpan').addEventListener('touchmove', function () {
         // Cancel if they move finger
         clearTimeout(holdTimeout);
@@ -567,12 +699,14 @@ function showAllLiveSongsAndSections() {
 
 
       // --- Handle Chords Per Row Editing ---
-      function editChordsPerRowPrompt() {
+      async function editChordsPerRowPrompt() {
+        recordState();
         const newChordsPerRow = prompt('Enter the number of chords per row (1–10):');
         const value = parseInt(newChordsPerRow, 10);
         if (!isNaN(value) && value > 0 && value <= 10) {
           songObj.chordsPerRow = value;
-          saveData().then(showAllLiveSongsAndSections());
+          await saveData();
+          showAllLiveSongsAndSections();
         } 
         else if (newChordsPerRow !== null) {
           alert("Please enter a valid number between 1 and 10.");
@@ -584,11 +718,11 @@ function showAllLiveSongsAndSections() {
         e.preventDefault();
         editChordsPerRowPrompt();
       }
-      // Set the original key on hold tap
+      // Edit chords per row on hold tap
       chordsContainer.querySelector('.chordsPerRow').addEventListener('touchstart', async function (e) {
         // Start the timer
-        e.preventDefault();
         holdTimeout = setTimeout(() => {
+          e.preventDefault();
           editChordsPerRowPrompt();
         }, holdTapThreshold);
       });
@@ -702,6 +836,7 @@ function showAllLiveSongsAndSections() {
             addChordBtn.className = 'addChordBtn';
             addChordBtn.textContent = '+';
             addChordBtn.addEventListener('click', async function() {
+              recordState();
               if (!liveSongsData[songObj.name]) {
                 liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
               }
@@ -747,6 +882,7 @@ function showAllLiveSongsAndSections() {
               addChordSectionBtn.textContent = '+';
 
                 addChordSectionBtn.addEventListener('click', async function() {
+                recordState();
                 if (!liveSongsData[songObj.name]) {
                   liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
                 }
@@ -772,6 +908,7 @@ function showAllLiveSongsAndSections() {
             function attachChordSpanListeners(chordSpan, sectionDiv, sectionIdx, chordsContainer, songObj) {
               chordSpan.addEventListener('dblclick', (e) => {
                 e.preventDefault();
+                recordState(); // <-- record before user starts editing live chord
                 chordSpan.contentEditable = true;
                 chordSpan.focus();
                 document.execCommand('selectAll', false, null);
@@ -781,9 +918,19 @@ function showAllLiveSongsAndSections() {
                 const currentTime = Date.now();
                 const tapLength = currentTime - lastTap;
                 if (tapLength < dblTapThreshold && tapLength > 0) {
+                  recordState(); // <-- record on double-tap before editing
                   chordSpan.contentEditable = true;
                   chordSpan.focus();
-                  document.execCommand('selectAll', false, null);
+                  // Select all text using modern API if possible
+                  try {
+                    const range = document.createRange();
+                    range.selectNodeContents(chordSpan);
+                    const sel = window.getSelection();
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                  } catch (err) {
+                    if (document.execCommand) document.execCommand('selectAll', false, null);
+                  }
                 }
                 lastTap = currentTime;
               });
@@ -838,7 +985,6 @@ function showAllLiveSongsAndSections() {
                   // Handle Nashville numbers
                   const numberRegex = /^([1-7])([b#]?)(.*)$/;
                   if (numberRegex.test(text) && !nashvilleMode) {
-                    // Convert Nashville number to actual chord
                     const [ , number, accidental, suffix ] = text.match(numberRegex);
                     const interpreted = transposeChord(number + accidental + suffix, 'C', selectedKey); // 'C' as root of Nashville
                     finalChord = transposeChord(interpreted, selectedKey, originalKey);
@@ -943,6 +1089,8 @@ function renderLeftContainer() {
     // Remove live songs from localStorage on right-click
     li.addEventListener('contextmenu', async function(e) {
       e.preventDefault();
+      // record state before mutating so undo can restore
+      recordState();
       // Remove the right-clicked song from the liveSongs array
       liveSongs = liveSongs.filter(name => name !== songName);
 
@@ -953,10 +1101,12 @@ function renderLeftContainer() {
       await saveData(); // Save the updated liveSongs and liveSongsData
     });
 
-    li.addEventListener('touchstart', async function (e) {
+    li.addEventListener('touchstart', function (e) {
       // Start the timer
       e.preventDefault();
-      holdTimeout = setTimeout(() => {
+      holdTimeout = setTimeout(async () => {
+        // record state before mutating so undo can restore
+        recordState();
         // Remove the right-clicked song from the liveSongs array
         liveSongs = liveSongs.filter(name => name !== songName);
 
@@ -964,8 +1114,8 @@ function renderLeftContainer() {
         delete liveSongsData[songName];
         // Remove the song from the dropdown menu
         li.remove();
+        await saveData(); // Save the updated liveSongs and liveSongsData
       }, holdTapThreshold);
-      await saveData(); // Save the updated liveSongs and liveSongsData
     });
 
     li.addEventListener('touchend', function () {
@@ -1109,10 +1259,6 @@ localStorage.setItem(`nashvilleMode_${currentUser}`, 'false');
 
 // --- UI Rendering ---
 function renderUI() {
-  let lastTap = 0;
-  const dblTapThreshold = 300; // max ms between taps to count as double-tap
-  const holdTapThreshold = 350; // min ms time to count as hold tap
-
   const buttons = document.querySelectorAll('.menuBtn');
   const menu = document.querySelector('.menu');
 
@@ -1173,6 +1319,8 @@ function renderUI() {
     // Remove live songs from localStorage on right-click
     li.addEventListener('contextmenu', async function(e) {
       e.preventDefault();
+      // record state before mutating so undo can restore
+      recordState();
       // Remove the right-clicked song from the liveSongs array
       liveSongs = liveSongs.filter(name => name !== songName);
 
@@ -1181,12 +1329,24 @@ function renderUI() {
       // Remove the song from the dropdown menu
       li.remove();
       await saveData(); // Save the updated liveSongs and liveSongsData
+
+      if (!songName) return;
+      // remove from liveSongs list
+      liveSongs = liveSongs.filter(name => name !== songName);
+      // remove live copy data
+      if (liveSongsData && liveSongsData[songName]) {
+        delete liveSongsData[songName];
+      }
+      await saveData();
+      renderUI();
     });
 
-    li.addEventListener('touchstart', async function (e) {
+    li.addEventListener('touchstart', function (e) {
       // Start the timer
       e.preventDefault();
-      holdTimeout = setTimeout(() => {
+      holdTimeout = setTimeout(async () => {
+        // record state before mutating so undo can restore
+        recordState();
         // Remove the right-clicked song from the liveSongs array
         liveSongs = liveSongs.filter(name => name !== songName);
 
@@ -1194,8 +1354,16 @@ function renderUI() {
         delete liveSongsData[songName];
         // Remove the song from the dropdown menu
         li.remove();
+        await saveData(); // Save the updated liveSongs and liveSongsData
+
+        if (!songName) return;
+        // remove from liveSongs list
+        liveSongs = liveSongs.filter(name => name !== songName);
+        // remove live copy data
+        if (liveSongsData && liveSongsData[songName]) {
+          delete liveSongsData[songName];
+        }
       }, holdTapThreshold);
-      await saveData(); // Save the updated liveSongs and liveSongsData
     });
 
     li.addEventListener('touchend', function () {
@@ -1292,6 +1460,7 @@ function renderUI() {
 
   container.querySelector('.beatSpan').ondblclick = function(e) {
     e.preventDefault();
+    recordState();
     const newBeatSpan = prompt('Enter The New Beats Per Bar:');
     if (newBeatSpan !== "") {
       currentSongObj.beatsPerBar = newBeatSpan;
@@ -1299,11 +1468,13 @@ function renderUI() {
       renderUI();
     }
   }
+
   // Set the original key on hold tap
   container.querySelector('.beatSpan').addEventListener('touchstart', function (e) {
     // Start the timer
     e.preventDefault();
     holdTimeout = setTimeout(() => {
+      recordState();
       const newBeatSpan = prompt('Enter The New Beats Per Bar');
       if (newBeatSpan !== "") {
         currentSongObj.beatsPerBar = newBeatSpan;
@@ -1325,6 +1496,7 @@ function renderUI() {
 
   // --- Handle Chords Per Row Editing ---
   function editChordsPerRowPrompt() {
+    recordState();
     const newChordsPerRow = prompt('Enter the number of chords per row (1–10):');
     const value = parseInt(newChordsPerRow, 10);
     if (!isNaN(value) && value > 0 && value <= 10) {
@@ -1341,7 +1513,7 @@ function renderUI() {
     e.preventDefault();
     editChordsPerRowPrompt();
   }
-  // Set the original key on hold tap
+  // Edit chords per row on hold tap
   container.querySelector('.chordsPerRow').addEventListener('touchstart', async function (e) {
     // Start the timer
     holdTimeout = setTimeout(() => {
@@ -1360,7 +1532,7 @@ function renderUI() {
   });
 
 
-  // Change the chords when you click a selected key
+  // Key Container
   if (Array.isArray(window.keyList)) {
     const keyContainer = document.createElement('div');
     keyContainer.className = 'keyContainer';
@@ -1380,6 +1552,7 @@ function renderUI() {
       }
       // Desktop click event
       keyBtn.addEventListener('click', async function() {
+        recordState();
         if (currentSongObj) {
           if (keyBtn.textContent === 'Num'){
             const current = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
@@ -1396,6 +1569,7 @@ function renderUI() {
       // Mobile touch event
       keyBtn.addEventListener('touchstart', async function(e) {
         e.preventDefault(); // Prevent default touch behavior
+        recordState();
         if (currentSongObj) {
           if (keyBtn.textContent === 'Num'){
             const current = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
@@ -1470,6 +1644,7 @@ function renderUI() {
       addChordBtn.className = 'addChordBtn';
       addChordBtn.textContent = '+';
       addChordBtn.addEventListener('click', function() {
+        recordState();
         if (currentSongObj) {
           if (!Array.isArray(currentSongObj.chords)) {
             currentSongObj.chords = [];
@@ -1489,6 +1664,7 @@ function renderUI() {
       deleteSectionBtn.className = 'deleteSectionBtn';
       deleteSectionBtn.textContent = '🗑️';
       deleteSectionBtn.addEventListener('click', function() {
+        recordState();
         if (currentSongObj) {
           const idx = currentSongObj.chords.indexOf(section);
           if (idx > -1) {
@@ -1524,6 +1700,7 @@ function renderUI() {
         if (tapLength < dblTapThreshold && tapLength > 0) {
           chordSpan.contentEditable = true;
           chordSpan.focus();
+          document.execCommand('selectAll', false, null);
         }
         lastTap = currentTime;
       });
@@ -1554,6 +1731,7 @@ function renderUI() {
         });
         // Set the chordSpan to be uneditable
         chordSpan.addEventListener('blur', function() {
+          recordState();
           chordSpan.contentEditable = false;
 
           const section = chordSpan.closest('.songSectionContainer');
@@ -1619,6 +1797,7 @@ function renderUI() {
     addChordSectionBtn.textContent = '+';
 
     addChordSectionBtn.addEventListener('click', function() {
+      recordState();
       if (currentSongObj) {
         if (!Array.isArray(currentSongObj.chords)) {
           currentSongObj.chords = [];
@@ -1649,6 +1828,7 @@ function renderUI() {
           }
         });
         section.addEventListener('blur', function() {
+          recordState();
           const sectionTitle = section.textContent;
           if (sectionTitle !== null && sectionTitle.trim() !== "") {
             const idx = Array.from(songSections).indexOf(section);
@@ -1672,6 +1852,7 @@ function renderUI() {
           }
           });
           section.addEventListener('blur', function() {
+            recordState();
             const sectionTitle = section.textContent;
             if (sectionTitle !== null && sectionTitle.trim() !== "") {
               const idx = Array.from(songSections).indexOf(section);
@@ -1784,7 +1965,7 @@ function renderUI() {
       const artistName = document.createElement('div');
       artistName.className = 'artistName';
       artistName.textContent = artistObj.artist;
-      artistContainer.appendChild(artistName);
+           artistContainer.appendChild(artistName);
 
       // Dropdown menu for songs
       const dropdownMenu = document.createElement('ul');
@@ -1826,6 +2007,7 @@ function renderUI() {
     addPartBtn.replaceWith(addPartBtn.cloneNode(true));
     const newAddPartBtn = document.querySelector('.addPartBtn');
     newAddPartBtn.addEventListener('click', function() {
+      recordState();
       if (currentSongObj) {
         if (!Array.isArray(currentSongObj.songMap)) {
           currentSongObj.songMap = [];
@@ -1860,17 +2042,21 @@ function renderUI() {
 
         // === Desktop Drag ===
         part.addEventListener('dragstart', (e) => {
+            // record snapshot once at drag start so undo can restore pre-drag order
+            recordState();
             e.dataTransfer.effectAllowed = 'move';
             part.classList.add('dragging');
         });
         part.addEventListener('dragend', async () => {
             part.classList.remove('dragging');
-            saveReorder();
+            await saveReorder();
         });
 
         // === Mobile Drag ===
         let startY = 0;
         part.addEventListener('touchstart', (e) => {
+            // record snapshot once at touch start for mobile drag
+            recordState();
             startY = e.touches[0].clientY;
             part.classList.add('dragging');
             e.preventDefault();
@@ -1884,7 +2070,7 @@ function renderUI() {
         });
         part.addEventListener('touchend', async () => {
             part.classList.remove('dragging');
-            saveReorder();
+            await saveReorder();
         });
 
         songMapList.appendChild(part);
@@ -1958,6 +2144,7 @@ function renderUI() {
 
     // Remove blur on Enter navigation (only blur if not moving to next)
     function startEditing(part, index) {
+      recordState();
       part.setAttribute('contentEditable', 'true');
       part.focus();
       document.execCommand('selectAll', false, null);
