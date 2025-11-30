@@ -374,6 +374,21 @@ function renderUI() {
             a.name.toLowerCase().localeCompare(b.name.toLowerCase())
           );
 
+          // Also, when renaming a song (inside restore() where you set newName), update live arrays/keys:
+          const oldName = song.name; // before rename
+          const newNameValue = newName; // your computed new name
+          appData[artistIdx].songs[songIdx].name = newNameValue;
+
+          // keep live lists in sync:
+          const liIdx = liveSongs.indexOf(oldName);
+          if (liIdx !== -1) {
+            liveSongs[liIdx] = newNameValue;
+          }
+          // move liveSongsData copy if present
+          if (liveSongsData && liveSongsData[oldName]) {
+            liveSongsData[newNameValue] = liveSongsData[oldName];
+            delete liveSongsData[oldName];
+          }
           saveData();
           renderUI();
         }
@@ -391,13 +406,15 @@ function renderUI() {
       deleteSongBtn.className = 'deleteBtn';
       deleteSongBtn.textContent = '🗑️';
       deleteSongBtn.onclick = async () => {
-        if (confirm('Delete this song?\n(This action cannot be undone)')) {
+        if (confirm(`Delete this song?\n Song Name: ${song.name}  \n (This action cannot be undone)`)) {
           const songNameToDelete = song.name;
 
           // Remove song from appData
           appData[artistIdx].songs.splice(songIdx, 1);
 
           delete liveSongsData[songNameToDelete];
+          // Also remove any live copy for that song
+          deleteLiveCopy(songNameToDelete);
 
           // Remove from liveSongs
           liveSongs = liveSongs.filter(name => name !== songNameToDelete);
@@ -421,19 +438,26 @@ function renderUI() {
         addToLiveBtn.textContent = '🔴'; // Use red circle for "inactive"
       }
       addToLiveBtn.onclick = async () => {
-        if (!liveSongs.includes(song.name)) {
-          liveSongs.push(song.name);
-          addToLiveBtn.textContent = '🟢'; // Use green circle for "active"
-        } 
-        else {
-          // Remove the song from liveSongs
-          liveSongs = liveSongs.filter(name => name !== song.name);
-          addToLiveBtn.textContent = '🔴'; // Use red circle for "inactive"
-        }
-        await saveData();
+        const songName = song.name;
 
-        // Store the index of the artist whose dropdown should be open
+        if (!liveSongs.includes(songName)) {
+          // add to live and create a fresh live copy from the original
+          liveSongs.push(songName);
+          liveSongsData[songName] = JSON.parse(JSON.stringify(song));
+          addToLiveBtn.textContent = '🟢';
+        } else {
+          // remove from live and delete live copy
+          liveSongs = liveSongs.filter(n => n !== songName);
+          if (liveSongsData && liveSongsData[songName]) delete liveSongsData[songName];
+          addToLiveBtn.textContent = '🔴';
+        }
+
+        // remember which artist dropdown to open
         localStorage.setItem(`openDropdownArtistIdx_${currentUser}`, artistIdx);
+
+        // persist and re-render
+        await saveData();
+        renderUI();
       }
 
       editBtn.appendChild(renameSongBtn);
