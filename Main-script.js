@@ -1,0 +1,2487 @@
+const firebaseConfig = {
+  apiKey: "AIzaSyDq2yjYSfyhiIbrviV0WhW-NKzdfk7ABrQ",
+  authDomain: "chords-and-song-maps.firebaseapp.com",
+  projectId: "chords-and-song-maps",
+  storageBucket: "chords-and-song-maps.appspot.com",
+  messagingSenderId: "364224410651",
+  appId: "1:364224410651:web:d26213bf0e0b536aae34be",
+  measurementId: "G-CQEJKPQX1C"
+};
+
+// Prevent double init
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
+}
+
+let appData = []; // Initialize globally, will be populated by Firestore
+let currentUser = null; // Will store the user UID
+
+let currentArtistIndex = -1;
+let currentSongIndex = -1;
+let currentSongData = null;
+
+let liveSongs = [];
+let liveSongsData = {};
+
+let beatsPerBar = 4;
+let chordsPerRow = 6;
+
+let lastTap = 0;
+const dblTapThreshold = 300; // max ms between taps to count as double-tap
+const holdTapThreshold = 350; // min ms time to count as hold tap
+
+// --- Undo / Redo History Manager ---
+let undoStack = [];
+let redoStack = [];
+const HISTORY_LIMIT = 60;
+let isApplyingHistory = false;
+
+// Create a deep snapshot of the application state we want to restore
+function createSnapshot() {
+  return {
+    appData: JSON.parse(JSON.stringify(appData || [])),
+    liveSongs: JSON.parse(JSON.stringify(liveSongs || [])),
+    liveSongsData: JSON.parse(JSON.stringify(liveSongsData || {})),
+    currentSongTitle: currentUser ? localStorage.getItem(`currentSongTitle_${currentUser}`) : null
+  };
+}
+
+// Record current state on the undo stack (call BEFORE making a change)
+function recordState() {
+  // don't record while applying an undo/redo
+  if (isApplyingHistory || !currentUser) return;
+  const snap = createSnapshot();
+  undoStack.push(snap);
+  if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+  // clear redo stack on a new action
+  redoStack = [];
+}
+
+// Internal: apply a snapshot and persist it. set save to Firestore and re-render.
+async function applySnapshot(snapshot) {
+  if (!snapshot) return;
+  // detect if user is currently viewing the live UI so we can restore it after applying snapshot
+  const wasLiveView = !!document.querySelector('.liveRightContainer') || !!document.querySelector('.liveSongMapContainer');
+
+  isApplyingHistory = true;
+  appData = snapshot.appData || [];
+  liveSongs = snapshot.liveSongs || [];
+  liveSongsData = snapshot.liveSongsData || {};
+  if (currentUser && snapshot.currentSongTitle !== null) {
+    localStorage.setItem(`currentSongTitle_${currentUser}`, snapshot.currentSongTitle);
+  }
+  // persist to Firestore without recording history
+  try {
+    if (currentUser) {
+      await firebase.firestore().collection('users').doc(currentUser).set({
+        appData: appData,
+        liveSongs: liveSongs,
+        liveSongsData: liveSongsData
+      }, { merge: true });
+    }
+  } catch (err) {
+    console.error('Error applying snapshot:', err);
+  }
+
+  // render main UI and restore live view if the user had it open
+  renderUI();
+  if (wasLiveView) {
+    // show live songs & ensure left container is up to date
+    try {
+      showAllLiveSongsAndSections();
+    } catch (e) {
+      // in case showAllLiveSongsAndSections isn't available yet, still call renderLeftContainer
+      console.warn('showAllLiveSongsAndSections failed during undo/redo restore:', e);
+    }
+    if (typeof renderLeftContainer === 'function') {
+      renderLeftContainer();
+    }
+  }
+
+  isApplyingHistory = false;
+}
+
+// Public undo/redo functions
+async function undo() {
+  if (undoStack.length === 0) return;
+  // push current state to redo stack
+  const current = createSnapshot();
+  redoStack.push(current);
+  const snap = undoStack.pop();
+  await applySnapshot(snap);
+}
+async function redo() {
+  if (redoStack.length === 0) return;
+  const current = createSnapshot();
+  undoStack.push(current);
+  const snap = redoStack.pop();
+  await applySnapshot(snap);
+}
+
+// Expose to window for buttons or manual calls
+window.recordState = recordState;
+window.undo = undo;
+window.redo = redo;
+
+// Keyboard shortcuts (Ctrl/Cmd+Z and Ctrl/Cmd+Y / Ctrl+Shift+Z)
+document.addEventListener('keydown', function (e) {
+  const meta = e.ctrlKey || e.metaKey;
+  if (!meta) return;
+  if (e.key.toLowerCase() === 'z') {
+    e.preventDefault();
+    // if Shift is pressed use redo (Cmd/Ctrl+Shift+Z)
+    if (e.shiftKey) {
+      redo();
+    } else {
+      undo();
+    }
+  } else if (e.key.toLowerCase() === 'y') {
+    e.preventDefault();
+    redo();
+  }
+});
+
+function transposeChord(chord, fromKey, toKey) {
+  const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
+
+  // Chromatic scales
+  const chromaticSharps = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const chromaticFlats = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+
+  function usesFlat(note) {
+    return note.includes('b') || note.includes('♭');
+  }
+
+  chord = chord.replace('♭', 'b');
+  fromKey = fromKey.replace('♭', 'b');
+  toKey = toKey.replace('♭', 'b');
+
+  // Convert Nashville number (e.g. "6b", "4#", etc.) to letter chord before continuing
+  const numberMatch = chord.match(/^([1-7])([b#]?)(.*)$/);
+  if (numberMatch) {
+    const [, number, accidental, suffix] = numberMatch;
+    const numberIndex = parseInt(number, 10) - 1;
+    const scaleSemitones = [0, 2, 4, 5, 7, 9, 11];
+    const sharpScale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+    const baseSemitone = scaleSemitones[numberIndex];
+    let finalSemitone = baseSemitone;
+
+    if (accidental === '#') finalSemitone = (baseSemitone + 1) % 12;
+    if (accidental === 'b') finalSemitone = (baseSemitone + 11) % 12;
+
+    const chordRoot = sharpScale[finalSemitone];
+
+    chord = chordRoot + (suffix || '');
+  }
+
+  const match = chord.match(/^([A-G][b#]?)(.*)$/);
+  if (!match) return chord;
+
+  let [, root, suffix] = match;
+  const useFlats = usesFlat(root) || usesFlat(toKey);
+  const chromatic = useFlats ? chromaticFlats : chromaticSharps;
+
+  const fromIdx = chromaticSharps.indexOf(fromKey) !== -1
+    ? chromaticSharps.indexOf(fromKey)
+    : chromaticFlats.indexOf(fromKey);
+
+  const toIdx = chromaticSharps.indexOf(toKey) !== -1
+    ? chromaticSharps.indexOf(toKey)
+    : chromaticFlats.indexOf(toKey);
+
+  const rootIdx = chromatic.indexOf(root);
+  if (fromIdx === -1 || toIdx === -1 || rootIdx === -1) return chord;
+
+  const shift = (toIdx - fromIdx + 12) % 12;
+  const newIndex = (rootIdx + shift) % 12;
+  const newRoot = chromatic[newIndex];
+
+  if (nashvilleMode) {
+    const nashvilleNumbersSharps = ['1', '1#', '2', '2#', '3', '4', '4#', '5', '5#', '6', '6#', '7'];
+    const nashvilleNumbersFlats = ['1', '2b', '2', '3b', '3', '4', '5b', '5', '6b', '6', '7b', '7'];
+
+    let keyIdx = chromatic.indexOf(toKey);
+    if (keyIdx === -1) keyIdx = chromatic.indexOf(fromKey);
+    const relIdx = (chromatic.indexOf(newRoot) - keyIdx + 12) % 12;
+    const nashNum = useFlats ? nashvilleNumbersFlats[relIdx] : nashvilleNumbersSharps[relIdx];
+
+    return nashNum + suffix;
+  }
+
+  return newRoot + suffix;
+}
+
+function getMajorScale(key) {
+  const semitoneMap = {
+    C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3,
+    E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8,
+    A: 9, 'A#': 10, Bb: 10, B: 11,
+  };
+
+  const sharpScale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const steps = [0, 2, 4, 5, 7, 9, 11]; // Major scale intervals in semitones
+
+  const startIndex = semitoneMap[key];
+  if (startIndex === undefined) return ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+
+  return steps.map(step => sharpScale[(startIndex + step) % 12]);
+}
+function convertToNashville(chord, key) {
+  const scale = getMajorScale(key);
+  const match = chord.match(/^([A-G][#b]?)(.*)?$/);
+  if (!match) return chord;
+
+  const [, root, suffix] = match;
+  const index = scale.indexOf(root);
+  if (index === -1) return chord;
+
+  return (index + 1).toString() + (suffix || '');
+}
+
+
+function transposeChordLine(line, fromKey, toKey) {
+  const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
+
+  return line
+    .split(/(\s+|·+)/) // split by space OR dot, keep separators
+    .map(part => {
+      const trimmed = part.trimStart();
+
+      // In Nashville mode, skip numbers like "1", "1/3", "6b", etc.
+      if (nashvilleMode && /^[1-7](b|#)?(\/[1-7](b|#)?)?$/.test(trimmed)) {
+        return part;
+      }
+
+      // Detect slash chords like D/F# or C#m7/G
+      if (trimmed.includes('/')) {
+        const [chordPart, bassPart] = trimmed.split('/');
+        const transposedChord = /^[A-G][b#♭]?/.test(chordPart)
+          ? transposeChord(chordPart, fromKey, toKey)
+          : chordPart;
+        const transposedBass = /^[A-G][b#♭]?/.test(bassPart)
+          ? transposeChord(bassPart, fromKey, toKey)
+          : bassPart;
+        return transposedChord + '/' + transposedBass;
+      }
+
+      // Normal chords (not slash)
+      if (/^[A-G][b#♭]?/.test(trimmed)) {
+        return transposeChord(trimmed, fromKey, toKey);
+      }
+      return part;
+    })
+    .join('');
+}
+
+function showAllLiveSongsAndSections() {
+  // mark that user is in live view so a refresh returns to live
+  const rightContainer = document.querySelector('.rightContainer');
+  rightContainer.innerHTML = "";
+
+  const liveRightContainer = document.createElement('div');
+  liveRightContainer.className = 'liveRightContainer'
+  rightContainer.appendChild(liveRightContainer);
+
+  const songMapContainer = document.querySelector('.songMapContainer');
+  if (songMapContainer.style.display === 'block') {
+    songMapContainer.style.display = 'none';
+  }
+
+  // Song Map Container
+  const liveSongMapContainer = document.createElement('div');
+  liveSongMapContainer.className = 'liveSongMapContainer';
+  liveRightContainer.appendChild(liveSongMapContainer);
+
+  // Title
+  const songMapTitle = document.createElement('div');
+  songMapTitle.className = 'songMapTitle';
+  songMapTitle.textContent = 'Song Map';
+  liveSongMapContainer.appendChild(songMapTitle);
+
+
+  // Find and render each live song
+  liveSongs.forEach(songName => {
+    let songObj = null;
+    let originalSongObj = null;
+
+    // Prefer an existing live copy (saved previously)
+    if (liveSongsData && liveSongsData[songName]) {
+      songObj = liveSongsData[songName];
+    } else {
+      // else try to find the original in appData and create a live copy from it
+      for (const artist of appData) {
+        originalSongObj = artist.songs.find(song => song.name === songName);
+        if (originalSongObj) {
+          songObj = JSON.parse(JSON.stringify(originalSongObj));
+          liveSongsData[songName] = songObj;
+          break;
+        }
+      }
+    }
+
+    // if neither original nor live copy exist, skip but warn
+    if (!songObj) {
+      console.warn(`Live song "${songName}" not found (no original and no live copy). Skipping.`);
+      return; // continue with next live song
+    }
+
+    // --- Restore focus on nextChord or nextSongMapPart in live view ---
+    setTimeout(() => {
+      if (nextChordFocus) {
+        const section = document.querySelectorAll('.songSectionContainer')[nextChordFocus.sectionIdx];
+        if (section) {
+          const chord = section.querySelectorAll('.chord')[nextChordFocus.chordIdx];
+          if (chord) {
+            chord.contentEditable = true;
+            chord.focus();
+            document.execCommand('selectAll', false, null);
+          }
+        }
+        nextChordFocus = null;
+      }
+
+      if (nextSongMapFocusIdx !== null) {
+        const part = document.querySelectorAll('.songMapPart')[nextSongMapFocusIdx];
+        if (part) {
+          part.contentEditable = true;
+          part.focus();
+          document.execCommand('selectAll', false, null);
+        }
+        nextSongMapFocusIdx = null;
+      }
+    }, 0);
+    if (songObj) {
+      // Show Song Map
+      function showSongMap(songObj, songMapList, changeSongMapBtn, addPartBtn, e) {
+        document.querySelector('.warning').style.display = 'none';
+
+        if (!liveSongsData[songObj.name]) {
+          liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
+        }
+
+        document.querySelectorAll('.liveSongMapContainer .songMapList').forEach(list => {
+          list.style.display = 'none';
+        });
+
+        songMapList.style.display = 'block';
+
+        // Remove color from all buttons
+        document.querySelectorAll('.changeSongMapBtn').forEach(b =>
+          b.classList.remove('changeSongMapBtnColor'));
+
+        // Add color to the clicked button
+        (e?.target || changeSongMapBtn).classList.add('changeSongMapBtnColor');
+
+        songMapList.innerHTML = '';
+        if (songObj && Array.isArray(songObj.songMap)) {
+          songObj.songMap.forEach(part => {
+            const li = document.createElement('li');
+            li.className = 'songMapPart';
+            li.textContent = part;
+            songMapList.appendChild(li);
+          });
+          attachSongMapPartListeners(songObj, songMapList);
+        }
+
+        // Add Song Map Part Button
+        if (addPartBtn) {
+          const newAddPartBtn = addPartBtn.cloneNode(true);
+          addPartBtn.replaceWith(newAddPartBtn);
+          newAddPartBtn.addEventListener('click', async function () {
+            if (songObj) {
+              if (!Array.isArray(songObj.songMap)) {
+                songObj.songMap = [];
+              }
+              songObj.songMap.push("Unknown");
+              // Remebers which song map list to open
+              localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+              await saveData(); // Save the updated liveSongsData
+              showAllLiveSongsAndSections();
+            }
+          });
+        }
+      };
+
+
+      function attachSongMapPartListeners(songObj, songMapList) {
+        const songMapParts = songMapList.querySelectorAll('.songMapPart');
+        songMapParts.forEach(part => {
+          part.addEventListener('dblclick', function (e) {
+            recordState();
+            e.preventDefault();
+            part.contentEditable = true;
+            part.focus();
+            document.execCommand('selectAll', false, null);
+            nextChordFocus = null;
+          });
+          // Double tap to edit the songmap part (touch)
+          part.addEventListener('touchend', function () {
+            recordState();
+            const currentTime = Date.now();
+            const prevTap = part._lastTap || 0;
+            const tapLength = currentTime - prevTap;
+
+            if (tapLength < 300 && tapLength > 0) { // use local threshold
+              part.contentEditable = true;
+              part.focus();
+              // Select all text of the part using modern Selection/Range API
+              try {
+                const range = document.createRange();
+                range.selectNodeContents(part);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+              } catch (err) {
+                // Fallback for very old environments (execCommand is deprecated)
+                if (document.execCommand) {
+                  document.execCommand('selectAll', false, null);
+                }
+              }
+              nextChordFocus = null;
+            }
+            part._lastTap = currentTime;
+          });
+
+          part.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+              recordState();
+              e.preventDefault();
+              const allParts = Array.from(document.querySelectorAll('.songMapPart'));
+              const idx = allParts.indexOf(part);
+              if (idx !== -1 && idx + 1 < allParts.length) {
+                nextSongMapFocusIdx = idx + 1;
+              } else {
+                nextSongMapFocusIdx = null;
+              }
+              setTimeout(() => part.blur(), 0);
+            }
+          });
+
+          part.addEventListener('blur', async function () {
+            recordState();
+            part.contentEditable = false;
+            const allParts = Array.from(songMapList.querySelectorAll('.songMapPart'));
+            const idx = allParts.indexOf(part);
+            if (songObj && songObj.songMap) {
+              songObj.songMap[idx] = part.textContent.trim();
+              if (part.textContent.trim() === '') {
+                songObj.songMap.splice(idx, 1);
+                part.remove(); // Remove the empty part from the DOM
+              }
+              localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+              await saveData(); // Save the updated liveSongsData
+              showAllLiveSongsAndSections();
+            }
+          });
+        });
+
+        const parts = songMapList.querySelectorAll('.songMapPart');
+
+        // --- Desktop ---
+        parts.forEach(part => {
+          part.setAttribute('draggable', 'true');
+
+          part.addEventListener('dragstart', function (e) {
+            recordState();
+            e.dataTransfer.effectAllowed = 'move';
+            part.classList.add('dragging');
+            window.draggedPart = part;
+          });
+          part.addEventListener('dragend', async function () {
+            recordState();
+            part.classList.remove('dragging');
+            window.draggedPart = null;
+            const reorderedParts = Array.from(songMapList.querySelectorAll('.songMapPart'))
+              .map(p => p.textContent.trim());
+
+            songObj.songMap = reorderedParts;
+            await saveData(); // Save the updated liveSongsData
+          });
+
+          // --- Mobile: touch-based drag ---
+          let startY = 0;
+          part.addEventListener('touchstart', function (e) {
+            recordState();
+            e.preventDefault();
+            window.draggedPart = part;
+            part.classList.add('dragging');
+            startY = e.touches[0].clientY;
+          });
+
+          part.addEventListener('touchmove', function (e) {
+            recordState();
+            e.preventDefault();
+            const touchY = e.touches[0].clientY;
+            const afterElement = getDragAfterElement(songMapList, touchY);
+            const dragging = document.querySelector('.dragging');
+            if (afterElement == null) {
+              songMapList.appendChild(dragging);
+            } else {
+              songMapList.insertBefore(dragging, afterElement);
+            }
+          });
+
+          part.addEventListener('touchend', function () {
+            recordState();
+            const dragging = document.querySelector('.dragging');
+            if (dragging) {
+              dragging.classList.remove('dragging');
+              window.draggedPart = null;
+              saveSongMapOrder();
+            }
+          });
+        });
+
+        // --- Desktop Dragover ---
+        songMapList.addEventListener('dragover', function (e) {
+          recordState();
+          e.preventDefault();
+          const dragging = document.querySelector('.dragging');
+          if (!dragging) return;
+          const afterElement = getDragAfterElement(songMapList, e.clientY);
+          if (afterElement == null) {
+            songMapList.appendChild(dragging);
+          }
+          else {
+            songMapList.insertBefore(dragging, afterElement);
+          }
+        });
+
+        function getDragAfterElement(container, y) {
+          const draggableElements = [...container.querySelectorAll('.songMapPart:not(.dragging)')];
+          return draggableElements.reduce((closest, child) => {
+            const box = child.getBoundingClientRect();
+            const offset = y - box.top - box.height / 2;
+            if (offset < 0 && offset > closest.offset) {
+              return { offset: offset, element: child };
+            }
+            else {
+              return closest;
+            }
+          }, { offset: -Infinity }).element;
+        }
+
+        // --- Save the new order ---
+        async function saveSongMapOrder() {
+          recordState();
+          const reorderedParts = Array.from(songMapList.querySelectorAll('.songMapPart'))
+            .map(p => p.textContent.trim());
+
+          songObj.songMap = reorderedParts;
+          await saveData(); // Save the updated liveSongsData
+        }
+      }
+
+
+      // Container for song title and changeSongMapBtn
+      const topContainer = document.createElement('div');
+      topContainer.className = 'topContainer';
+      if (window.innerWidth < 600) {
+        topContainer.style.justifyContent = 'left';
+        topContainer.style.paddingLeft = '40px';
+      }
+      liveRightContainer.appendChild(topContainer);
+
+      // Song title
+      const songTitle = document.createElement('div');
+      songTitle.className = 'title';
+      songTitle.textContent = songObj.name;
+      topContainer.appendChild(songTitle);
+
+      // Add Part Button
+      if (!liveSongMapContainer.querySelector('.addPartBtn')) {
+        const addPartBtn = document.createElement('button');
+        addPartBtn.className = 'addPartBtn';
+        addPartBtn.textContent = '+';
+        liveSongMapContainer.appendChild(addPartBtn);
+
+        // Warning (or whatever you want to call it)
+        const warning = document.createElement('div');
+        warning.style.fontSize = '30px';
+        if (window.innerWidth < 600) {
+          warning.style.fontSize = '13px';
+        }
+        warning.className = 'warning'
+        warning.textContent = 'No Song Map Displayed'
+        liveSongMapContainer.appendChild(warning);
+      }
+      const addPartBtn = liveSongMapContainer.querySelector('.addPartBtn');
+
+      // Unique list
+      const songMapList = document.createElement('ul');
+      songMapList.className = 'songMapList';
+      songMapList.dataset.songName = songObj.name;
+      liveSongMapContainer.insertBefore(songMapList, addPartBtn);
+
+      // Change Song Map Button
+      const changeSongMapBtn = document.createElement('button');
+      changeSongMapBtn.className = 'changeSongMapBtn';
+      changeSongMapBtn.textContent = '🗺️';
+      topContainer.insertBefore(changeSongMapBtn, songTitle);
+      changeSongMapBtn.onclick = function () {
+        localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+        showAllLiveSongsAndSections();
+      };
+
+      const openMapForSong = localStorage.getItem(`openMapForSong_${currentUser}`);
+      if (openMapForSong === songObj.name || openMapForSong === 'null') {
+        showSongMap(songObj, songMapList, changeSongMapBtn, addPartBtn);
+        localStorage.removeItem(`openMapForSong_${currentUser}`);
+      }
+
+
+      // ChordsContainer
+      const chordsContainer = document.createElement('div');
+      chordsContainer.className = 'chordsContainer';
+      liveRightContainer.appendChild(chordsContainer);
+
+      // Original key
+      const originalKeySpan = document.createElement('span');
+      originalKeySpan.className = 'originalKey';
+      const oriKey = songObj.originalKey || 'Unknown';
+      if (originalKeySpan) {
+        originalKeySpan.textContent = "Original Key: " + oriKey; // Display the original key
+      }
+      chordsContainer.appendChild(originalKeySpan);
+
+
+      // Beats per bar
+      const beatDisplay = document.createElement('span');
+      beatDisplay.innerHTML = `Beats Per Bar: <span class="beatSpan">${songObj?.beatsPerBar || '4'}</span>`;
+      beatDisplay.style.fontSize = '30px';
+      if (window.innerWidth < 600) {
+        beatDisplay.style.fontSize = '13px';
+      }
+      chordsContainer.appendChild(beatDisplay);
+
+      // Add the chordsperrow span
+      const chordsPerRowSpan = document.createElement('span');
+      chordsPerRowSpan.innerHTML = `Chords Per Row: <span class="chordsPerRow">${songObj?.chordsPerRow || '4'}</span>`;
+      chordsPerRowSpan.style.fontSize = '30px';
+      if (window.innerWidth < 600) {
+        chordsPerRowSpan.style.fontSize = '13px';
+      }
+      chordsContainer.appendChild(chordsPerRowSpan);
+
+      chordsContainer.querySelector('.beatSpan').ondblclick = function (e) {
+        e.preventDefault();
+        recordState();
+        const newBeatSpan = prompt('Enter The New Beats Per Bar:');
+        if (newBeatSpan !== "") {
+          songObj.beatsPerBar = newBeatSpan;
+          saveData();
+          showAllLiveSongsAndSections();
+        }
+      }
+
+      // Set the original key on hold tap
+      chordsContainer.querySelector('.beatSpan').addEventListener('touchstart', function (e) {
+        // Start the timer
+        e.preventDefault();
+        holdTimeout = setTimeout(() => {
+          recordState();
+          const newBeatSpan = prompt('Enter The New Beats Per Bar');
+          if (newBeatSpan !== "") {
+            songObj.beatsPerBar = newBeatSpan;
+            saveData();
+            showAllLiveSongsAndSections();
+          }
+        }, holdTapThreshold);
+      });
+      chordsContainer.querySelector('.beatSpan').addEventListener('touchend', function () {
+        // Cancel if released early
+        clearTimeout(holdTimeout);
+      });
+      chordsContainer.querySelector('.beatSpan').addEventListener('touchmove', function () {
+        // Cancel if they move finger
+        clearTimeout(holdTimeout);
+      });
+
+
+      // --- Handle Chords Per Row Editing ---
+      async function editChordsPerRowPrompt() {
+        recordState();
+        const newChordsPerRow = prompt('Enter the number of chords per row (1–10):');
+        const value = parseInt(newChordsPerRow, 10);
+        if (!isNaN(value) && value > 0 && value <= 10) {
+          songObj.chordsPerRow = value;
+          await saveData();
+          showAllLiveSongsAndSections();
+        }
+        else if (newChordsPerRow !== null) {
+          alert("Please enter a valid number between 1 and 10.");
+        }
+      }
+
+
+      chordsContainer.querySelector('.chordsPerRow').ondblclick = async function (e) {
+        e.preventDefault();
+        editChordsPerRowPrompt();
+      }
+      // Edit chords per row on hold tap
+      chordsContainer.querySelector('.chordsPerRow').addEventListener('touchstart', async function (e) {
+        // Start the timer
+        holdTimeout = setTimeout(() => {
+          e.preventDefault();
+          editChordsPerRowPrompt();
+        }, holdTapThreshold);
+      });
+      chordsContainer.querySelector('.chordsPerRow').addEventListener('touchend', function () {
+        // Cancel if released early
+        clearTimeout(holdTimeout);
+      });
+
+      chordsContainer.querySelector('.chordsPerRow').addEventListener('touchmove', function () {
+        // Cancel if they move finger
+        clearTimeout(holdTimeout);
+      });
+
+
+      // Key Container
+      if (Array.isArray(window.keyList)) {
+        const keyContainer = document.createElement('div');
+        keyContainer.className = 'keyContainer';
+        window.keyList.forEach(key => {
+          const keyBtn = document.createElement('button');
+          keyBtn.className = 'key';
+          keyBtn.textContent = key;
+          if (keyBtn.textContent === 'Num') {
+            keyBtn.classList.add('numKey');
+          }
+          // Highlight the selected key
+          if (key === (songObj?.currentKey || songObj?.originalKey)) {
+            keyBtn.classList.add('selectedKey');
+          }
+          else if (key === 'Num' && localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true') {
+            keyBtn.classList.add('selectedNumKey');
+          }
+          keyBtn.addEventListener('click', async function () {
+            if (songObj) {
+              // Always operate on the liveSongsData copy
+              if (!liveSongsData[songObj.name]) {
+                liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
+              }
+              if (keyBtn.textContent === 'Num') {
+                // Add Nashville toggle button
+                const current = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
+                localStorage.setItem(`nashvilleMode_${currentUser}`, (!current).toString());
+                localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+                showAllLiveSongsAndSections();
+              }
+              else {
+                liveSongsData[songObj.name].currentKey = key; // Store the selected key in live data
+                localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+                await saveData(); // Save the updated liveSongsData
+                showAllLiveSongsAndSections();
+              }
+            }
+          });
+          keyContainer.appendChild(keyBtn);
+        });
+        liveRightContainer.insertBefore(keyContainer, chordsContainer); // Insert above chordsContainer
+      }
+
+
+      // Chord sections
+      if (Array.isArray(songObj.chords)) {
+        songObj.chords.forEach((section, sectionIdx) => {
+          const sectionDiv = document.createElement('div');
+          sectionDiv.className = 'songSectionContainer';
+          // Section name
+          const sectionTitle = document.createElement('div');
+          sectionTitle.className = 'sectionTitle';
+          sectionTitle.textContent = section.section;
+          sectionDiv.appendChild(sectionTitle);
+
+          const chords = document.createElement('div');
+          chords.className = 'chords';
+
+          chordsPerRow = songObj.chordsPerRow || 4;
+          for (let i = 0; i < section.chords.length; i += chordsPerRow) {
+            const rowDiv = document.createElement('div');
+            rowDiv.className = 'chord-row';
+
+            // Add starting line
+            const startLine = document.createElement('span');
+            startLine.className = 'line';
+            startLine.textContent = '|';
+            rowDiv.appendChild(startLine);
+
+            for (let j = 0; j < chordsPerRow && (i + j) < section.chords.length; j++) {
+
+              const chordSpan = document.createElement('span');
+              chordSpan.className = 'chord';
+              const fromKey = songObj.originalKey;
+              const toKey = songObj.currentKey || fromKey;
+              const displayChord = transposeChordLine(section.chords[i + j], fromKey, toKey);
+              chordSpan.textContent = displayChord;
+              rowDiv.appendChild(chordSpan);
+
+              const line = document.createElement('span');
+              line.className = 'line';
+              line.textContent = '|';
+              rowDiv.appendChild(line);
+            }
+            chords.appendChild(rowDiv);
+          }
+          sectionDiv.appendChild(chords);
+          chordsContainer.appendChild(sectionDiv);
+
+          // Add Edit Button
+          const editBtn = document.createElement('button');
+          editBtn.className = 'editBtn';
+
+          // Add Chord Buttons
+          const addChordBtn = document.createElement('button');
+          addChordBtn.className = 'addChordBtn';
+          addChordBtn.textContent = '+';
+          addChordBtn.addEventListener('click', async function () {
+            recordState();
+            if (!liveSongsData[songObj.name]) {
+              liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
+            }
+            liveSongsData[songObj.name].chords[sectionIdx].chords.push("• • • •");
+            if (!liveSongsData[songObj.name]) {
+              liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
+            }
+            localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+            await saveData(); // Save the updated liveSongsData
+            showAllLiveSongsAndSections();
+          });
+
+          // Delete Section Button
+          const deleteSectionBtn = document.createElement('button');
+          deleteSectionBtn.className = 'deleteSectionBtn';
+          deleteSectionBtn.textContent = '🗑️';
+          deleteSectionBtn.addEventListener('click', async function () {
+            // Ensure liveSongsData for this song exists, or create it as a copy of the original
+            if (!liveSongsData[songObj.name]) {
+              liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
+            }
+            // Remove the section at sectionIdx from the live data
+            liveSongsData[songObj.name].chords.splice(sectionIdx, 1);
+
+            // Save changes to localStorage if needed
+            localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+            await saveData(); // Save the updated liveSongsData
+            showAllLiveSongsAndSections();
+          });
+
+          chords.appendChild(editBtn);
+          editBtn.appendChild(addChordBtn);
+          editBtn.appendChild(deleteSectionBtn);
+
+
+          // Only add these after the last section
+          if (sectionIdx === songObj.chords.length - 1) {
+            const hr = document.createElement('hr');
+            chordsContainer.appendChild(hr);
+
+            const addChordSectionBtn = document.createElement('button');
+            addChordSectionBtn.className = 'addChordSectionBtn';
+            addChordSectionBtn.textContent = '+';
+
+            addChordSectionBtn.addEventListener('click', async function () {
+              recordState();
+              if (!liveSongsData[songObj.name]) {
+                liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
+              }
+              if (!Array.isArray(liveSongsData[songObj.name].chords)) {
+                liveSongsData[songObj.name].chords = [];
+              }
+              // Always use beatsPerBar from the original song object
+              if (songObj && songObj.beatsPerBar) {
+                beatsPerBar = parseInt(songObj.beatsPerBar, 10) || 4;
+              }
+              const dots = Array(beatsPerBar).fill('•').join(' ');
+              liveSongsData[songObj.name].chords.push({ section: "New Section", chords: [dots] });
+              // Also update beatsPerBar in the live data to match the original
+              liveSongsData[songObj.name].beatsPerBar = beatsPerBar;
+              localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+              await saveData(); // Save the updated liveSongsData
+              showAllLiveSongsAndSections();
+            });
+
+            chordsContainer.appendChild(addChordSectionBtn);
+          }
+
+          function attachChordSpanListeners(chordSpan, sectionDiv, sectionIdx, chordsContainer, songObj) {
+            chordSpan.addEventListener('dblclick', (e) => {
+              e.preventDefault();
+              recordState(); // <-- record before user starts editing live chord
+              chordSpan.contentEditable = true;
+              chordSpan.focus();
+              document.execCommand('selectAll', false, null);
+            });
+
+            chordSpan.addEventListener('touchend', () => {
+              const currentTime = Date.now();
+              const tapLength = currentTime - lastTap;
+              if (tapLength < dblTapThreshold && tapLength > 0) {
+                recordState(); // <-- record on double-tap before editing
+                chordSpan.contentEditable = true;
+                chordSpan.focus();
+                // Select all text using modern API if possible
+                try {
+                  const range = document.createRange();
+                  range.selectNodeContents(chordSpan);
+                  const sel = window.getSelection();
+                  sel.removeAllRanges();
+                  sel.addRange(range);
+                } catch (err) {
+                  if (document.execCommand) document.execCommand('selectAll', false, null);
+                }
+              }
+              lastTap = currentTime;
+            });
+
+            chordSpan.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                const allSections = Array.from(chordsContainer.querySelectorAll('.songSectionContainer'));
+                const allChords = Array.from(sectionDiv.querySelectorAll('.chord'));
+                const chordIdx = allChords.indexOf(chordSpan);
+
+                // Set focus target for next
+                if (chordIdx < allChords.length - 1) {
+                  nextChordFocus = { sectionIdx, chordIdx: chordIdx + 1 };
+                } else if (sectionIdx < allSections.length - 1) {
+                  nextChordFocus = { sectionIdx: sectionIdx + 1, chordIdx: 0 };
+                } else {
+                  nextChordFocus = null;
+                }
+                setTimeout(() => chordSpan.blur(), 0);
+              }
+            });
+
+            chordSpan.addEventListener('blur', async () => {
+              chordSpan.contentEditable = false;
+              const allChords = Array.from(sectionDiv.querySelectorAll('.chord'));
+              const chordIdx = allChords.indexOf(chordSpan);
+              const text = chordSpan.textContent.trim();
+
+              if (!liveSongsData[songObj.name]) {
+                liveSongsData[songObj.name] = JSON.parse(JSON.stringify(songObj));
+              }
+
+              if (text === '') {
+                liveSongsData[songObj.name].chords[sectionIdx].chords.splice(chordIdx, 1);
+
+                const line = chordSpan.previousElementSibling;
+                if (line && line.classList.contains('line')) line.remove();
+                chordSpan.remove();
+
+                if (liveSongsData[songObj.name].chords[sectionIdx].chords.length === 0) {
+                  liveSongsData[songObj.name].chords.splice(sectionIdx, 1);
+                }
+              }
+              else {
+                const originalKey = songObj.originalKey || 'C';
+                const selectedKey = songObj.currentKey || originalKey;
+                const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
+
+                let finalChord;
+
+                // Handle Nashville numbers
+                const numberRegex = /^([1-7])([b#]?)(.*)$/;
+                if (numberRegex.test(text) && !nashvilleMode) {
+                  const [, number, accidental, suffix] = text.match(numberRegex);
+                  const interpreted = transposeChord(number + accidental + suffix, 'C', selectedKey); // 'C' as root of Nashville
+                  finalChord = transposeChord(interpreted, selectedKey, originalKey);
+                } else {
+                  // Convert regular chord from display key to original key
+                  finalChord = transposeChord(text, selectedKey, originalKey);
+                }
+
+                // Update chord in data
+                liveSongsData[songObj.name].chords[sectionIdx].chords[chordIdx] = finalChord;
+              }
+              localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+              await saveData(); // Save the updated liveSongsData
+              showAllLiveSongsAndSections();
+            });
+          }
+
+          // Double click to edit chords
+          const chordSpans = sectionDiv.querySelectorAll('.chord');
+          chordSpans.forEach(chordSpan => {
+            attachChordSpanListeners(chordSpan, sectionDiv, sectionIdx, chordsContainer, songObj);
+          });
+
+          // Rename Chord Section (attach only once per section)
+          sectionTitle.addEventListener('dblclick', function () {
+            sectionTitle.contentEditable = true;
+            sectionTitle.focus();
+            sectionTitle.addEventListener('keydown', function (e) {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                sectionTitle.blur();
+              }
+            });
+            sectionTitle.addEventListener('blur', async function () {
+              sectionTitle.contentEditable = false;
+              const newSectionName = sectionTitle.textContent;
+              if (newSectionName !== null && newSectionName.trim() !== "") {
+                // Find the index of this sectionTitle among all section titles within the current song's container
+                const allSectionTitles = Array.from(sectionDiv.parentNode.querySelectorAll('.sectionTitle'));
+                const idx = allSectionTitles.indexOf(sectionTitle);
+                if (idx !== -1 && liveSongsData[songObj.name] && liveSongsData[songObj.name].chords[idx]) {
+                  liveSongsData[songObj.name].chords[idx].section = newSectionName;
+                  await saveData(); // Save the updated liveSongsData
+                }
+              }
+            });
+          });
+        });
+      }
+    }
+  });
+
+  // If no live songs, show a message
+  if (liveSongs.length === 0) {
+    liveRightContainer.innerHTML = '<div align="center">No Live Songs Selected.</div>';
+  }
+}
+function renderLeftContainer() {
+  // Left Container
+  const leftContainer = document.querySelector('.leftContainer');
+  leftContainer.innerHTML = ''; // Clear previous content
+
+  const liveTitle = document.createElement('div');
+  liveTitle.className = 'liveTitle';
+  liveTitle.textContent = 'Live Song ▼';
+  leftContainer.appendChild(liveTitle);
+
+  const liveContainer = document.createElement('div');
+  liveContainer.className = 'liveContainer';
+  leftContainer.appendChild(liveContainer);
+
+  // Always show the liveContainer when rendering UI
+  liveContainer.style.display = 'block';
+
+  // Use the static dropdown-menu if it exists, otherwise create it
+  let dropdownMenu = document.querySelector('.dropdown-menu');
+  if (!dropdownMenu) {
+    dropdownMenu = document.createElement('ul');
+    dropdownMenu.className = 'dropdown-menu';
+    liveContainer.appendChild(dropdownMenu);
+  }
+  dropdownMenu.innerHTML = ''; // Clear previous content
+
+  liveSongs.forEach(songName => {
+    const li = document.createElement('li');
+    li.className = 'songName';
+    li.textContent = songName;
+    dropdownMenu.appendChild(li);
+
+    // Add click event to each song name
+    li.addEventListener('click', function () {
+      localStorage.setItem(`currentSongTitle_${currentUser}`, songName);
+      if (title) title.textContent = songName; // Update the title
+      liveContainer.style.display = 'none'; // Hide the dropdown after selection
+      const rightContainer = document.querySelector('.rightContainer');
+      if (rightContainer) rightContainer.innerHTML = `<div class="chordsContainer"></div>`;
+
+      saveData(); // Save the current song title
+      renderUI(); // Re-render UI to reflect changes
+    });
+
+    // Remove live songs from localStorage on right-click
+    li.addEventListener('contextmenu', async function (e) {
+      e.preventDefault();
+      // record state before mutating so undo can restore
+      recordState();
+      // Remove the right-clicked song from the liveSongs array
+      liveSongs = liveSongs.filter(name => name !== songName);
+
+      // Remove this song from liveSongsData
+      delete liveSongsData[songName];
+      // Remove the song from the dropdown menu
+      li.remove();
+      await saveData(); // Save the updated liveSongs and liveSongsData
+    });
+
+    li.addEventListener('touchstart', function (e) {
+      // Start the timer
+      e.preventDefault();
+      holdTimeout = setTimeout(async () => {
+        // record state before mutating so undo can restore
+        recordState();
+        // Remove the right-clicked song from the liveSongs array
+        liveSongs = liveSongs.filter(name => name !== songName);
+
+        // Remove this song from liveSongsData
+        delete liveSongsData[songName];
+        // Remove the song from the dropdown menu
+        li.remove();
+        await saveData(); // Save the updated liveSongs and liveSongsData
+      }, holdTapThreshold);
+    });
+
+    li.addEventListener('touchend', function () {
+      // Cancel if released early
+      clearTimeout(holdTimeout);
+    });
+
+    li.addEventListener('touchmove', function () {
+      // Cancel if they move finger
+      clearTimeout(holdTimeout);
+    });
+  });
+
+  let title = document.querySelector('.title');
+
+
+  // Double-click to display all live songs and set the title
+  liveTitle.addEventListener('dblclick', function () {
+    localStorage.setItem(`openMapForSong_${currentUser}`, null);
+    showAllLiveSongsAndSections();
+  });
+
+  let holdTimeout = null;
+  // Hold-Tap to display all live songs and set the title
+  liveTitle.addEventListener('touchstart', function () {
+    // Start the timer
+    holdTimeout = setTimeout(() => {
+      // If the user holds long enough, do this:
+      localStorage.setItem(`openMapForSong_${currentUser}`, null);
+      document.querySelector('.title').style.display = 'none';
+      showAllLiveSongsAndSections();
+    }, holdTapThreshold);
+  });
+
+  liveTitle.addEventListener('touchend', function () {
+    // Cancel if released early
+    clearTimeout(holdTimeout);
+  });
+
+  liveTitle.addEventListener('touchmove', function () {
+    // Cancel if they move finger
+    clearTimeout(holdTimeout);
+  });
+
+  // Add event listener to liveTitle to toggle dropdown
+  liveTitle.addEventListener('click', function () {
+    dropdownMenu.classList.toggle('show');
+  });
+}
+
+// --- Data Model and Persistence ---
+firebase.auth().onAuthStateChanged(async (user) => {
+  if (!user) {
+    window.location.href = "index.html"; // Redirect to login if not authenticated
+    return;
+  }
+
+  currentUser = user.uid; // Set currentUser UID
+
+  try {
+    const doc = await firebase.firestore().collection('users').doc(currentUser).get();
+
+    // Dark mode loading
+    if (doc.exists) {
+      const userData = doc.data();
+      appData = userData.appData || []; // Load appData into your global variable
+      liveSongs = userData.liveSongs || []; // Load liveSongs into your global variable
+      liveSongsData = userData.liveSongsData || {}; // Load liveSongsData into your global variable
+      const isDarkMode = userData.darkMode === true; // Load darkMode state
+
+      const darkBtn = document.querySelector('#darkBtn');
+
+      if (isDarkMode) {
+        document.body.classList.add('dark-mode');
+        darkBtn.textContent = '☼';
+      }
+      else {
+        document.body.classList.remove('dark-mode');
+        darkBtn.textContent = '☾⋆';
+      }
+    }
+    else {
+      appData = []; // Default to empty array if no user data found
+      liveSongs = []; // Default to empty array if no live songs found
+      document.body.classList.remove('dark-mode'); // Default to light mode if no data
+    }
+
+    // --- CHECK PERSISTED VIEW FLAG BEFORE RENDER ---
+    const liveSection = localStorage.getItem(`liveSection_${currentUser}`);
+
+    if (liveSection === 'true') {
+      localStorage.setItem(`openMapForSong_${currentUser}`, null);
+
+      // clear one-time liveSection flag and persist view state
+      localStorage.setItem(`liveSection_${currentUser}`, 'false');
+
+      // render live UI and left column, then exit early
+      showAllLiveSongsAndSections();
+      if (typeof renderLeftContainer === 'function') renderLeftContainer();
+
+      // clear any requested openMap flag so it doesn't re-open unexpectedly
+      localStorage.setItem(`openMapForSong_${currentUser}`, null);
+      return; // do not call renderUI()
+    }
+
+    // Default: render original UI
+    renderUI();
+    document.body.classList.remove('loading');
+  }
+  catch (error) {
+    console.error("Error loading user data from Firestore:", error);
+    // Potentially redirect to an error page or show a user-friendly message
+  }
+});
+
+
+// Save data to Firestore
+async function saveData() {
+  if (!currentUser) { // Ensure currentUser is available
+    console.error("User not logged in, cannot save data.");
+    return;
+  }
+  // Add a defensive check here to ensure appData is an array before saving
+  if (!Array.isArray(appData)) {
+    console.error("appData is not an array, cannot save:", appData);
+    appData = []; // Reset to empty array to prevent future errors
+  }
+
+  try {
+    await firebase.firestore().collection('users').doc(currentUser).set({
+      appData: appData, // THIS refers to the global `appData` variable
+      liveSongs: liveSongs,
+      liveSongsData: liveSongsData
+    }, { merge: true });
+  }
+  catch (error) {
+    console.error("Error saving app data to Firestore:", error);
+  }
+}
+
+
+window.keyList = [
+  'A', 'A#', 'Bb', 'B', 'C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'Num'
+];
+
+let nextChordFocus = null; // To track the next chord to focus after editing
+let nextSongMapFocusIdx = null; // To track the next song map part to focus after editing
+
+localStorage.setItem(`nashvilleMode_${currentUser}`, 'false');
+
+// --- UI Rendering ---
+function renderUI() {
+  const buttons = document.querySelectorAll('.menuBtn');
+  const menu = document.querySelector('.menu');
+
+  if (window.innerWidth < 600) {
+    buttons.forEach(button => {
+      button.style.display = 'none';
+      button.style.fontSize = '18px';
+      button.style.margin = '0';
+      document.getElementById('hideShowBtn').style.display = 'block'
+    });
+    menu.style.width = '20px';
+    menu.style.height = '22px';
+  }
+
+  // Left Container
+  const leftContainer = document.querySelector('.leftContainer');
+  leftContainer.innerHTML = ''; // Clear previous content
+
+  const liveTitle = document.createElement('div');
+  liveTitle.className = 'liveTitle';
+  liveTitle.textContent = 'Live Song ▼';
+  leftContainer.appendChild(liveTitle);
+
+  const liveContainer = document.createElement('div');
+  liveContainer.className = 'liveContainer';
+  leftContainer.appendChild(liveContainer);
+
+  // Always show the liveContainer when rendering UI
+  liveContainer.style.display = 'block';
+
+  // Use the static dropdown-menu if it exists, otherwise create it
+  let dropdownMenu = document.querySelector('.dropdown-menu');
+  if (!dropdownMenu) {
+    dropdownMenu = document.createElement('ul');
+    dropdownMenu.className = 'dropdown-menu';
+    liveContainer.appendChild(dropdownMenu);
+  }
+  dropdownMenu.innerHTML = ''; // Clear previous content
+
+  liveSongs.forEach(songName => {
+    const li = document.createElement('li');
+    li.className = 'songName';
+    li.textContent = songName;
+    dropdownMenu.appendChild(li);
+
+    // Add click event to each song name
+    li.addEventListener('click', function () {
+      localStorage.setItem(`currentSongTitle_${currentUser}`, songName);
+      if (title) title.textContent = songName; // Update the title
+      liveContainer.style.display = 'none'; // Hide the dropdown after selection
+      const rightContainer = document.querySelector('.rightContainer');
+      if (rightContainer) rightContainer.innerHTML = `<div class="chordsContainer"></div>`;
+
+      saveData(); // Save the current song title
+      renderUI(); // Re-render UI to reflect changes
+    });
+
+    // Remove live songs from localStorage on right-click
+    li.addEventListener('contextmenu', async function (e) {
+      e.preventDefault();
+      // record state before mutating so undo can restore
+      recordState();
+      // Remove the right-clicked song from the liveSongs array
+      liveSongs = liveSongs.filter(name => name !== songName);
+
+      // Remove this song from liveSongsData
+      delete liveSongsData[songName];
+      // Remove the song from the dropdown menu
+      li.remove();
+      await saveData(); // Save the updated liveSongs and liveSongsData
+
+      if (!songName) return;
+      // remove from liveSongs list
+      liveSongs = liveSongs.filter(name => name !== songName);
+      // remove live copy data
+      if (liveSongsData && liveSongsData[songName]) {
+        delete liveSongsData[songName];
+      }
+      await saveData();
+      renderUI();
+    });
+
+    li.addEventListener('touchstart', function (e) {
+      // Start the timer
+      e.preventDefault();
+      holdTimeout = setTimeout(async () => {
+        // record state before mutating so undo can restore
+        recordState();
+        // Remove the right-clicked song from the liveSongs array
+        liveSongs = liveSongs.filter(name => name !== songName);
+
+        // Remove this song from liveSongsData
+        delete liveSongsData[songName];
+        // Remove the song from the dropdown menu
+        li.remove();
+        await saveData(); // Save the updated liveSongs and liveSongsData
+
+        if (!songName) return;
+        // remove from liveSongs list
+        liveSongs = liveSongs.filter(name => name !== songName);
+        // remove live copy data
+        if (liveSongsData && liveSongsData[songName]) {
+          delete liveSongsData[songName];
+        }
+      }, holdTapThreshold);
+    });
+
+    li.addEventListener('touchend', function () {
+      // Cancel if released early
+      clearTimeout(holdTimeout);
+    });
+
+    li.addEventListener('touchmove', function () {
+      // Cancel if they move finger
+      clearTimeout(holdTimeout);
+    });
+  });
+
+  let title = document.querySelector('.title');
+
+
+  // Double-click to display all live songs and set the title
+  liveTitle.addEventListener('dblclick', function () {
+    localStorage.setItem(`openMapForSong_${currentUser}`, null);
+    showAllLiveSongsAndSections();
+  });
+
+  let holdTimeout = null;
+  // Hold-Tap to display all live songs and set the title
+  liveTitle.addEventListener('touchstart', function () {
+    // Start the timer
+    holdTimeout = setTimeout(() => {
+      // If the user holds long enough, do this:
+      localStorage.setItem(`openMapForSong_${currentUser}`, null);
+      document.querySelector('.title').style.display = 'none';
+      showAllLiveSongsAndSections();
+    }, holdTapThreshold);
+  });
+
+  liveTitle.addEventListener('touchend', function () {
+    // Cancel if released early
+    clearTimeout(holdTimeout);
+  });
+
+  liveTitle.addEventListener('touchmove', function () {
+    // Cancel if they move finger
+    clearTimeout(holdTimeout);
+  });
+
+  // Add event listener to liveTitle to toggle dropdown
+  liveTitle.addEventListener('click', function () {
+    dropdownMenu.classList.toggle('show');
+  });
+
+
+  // Get the current song title from localStorage
+  const currentSongTitle = localStorage.getItem(`currentSongTitle_${currentUser}`);
+  let currentSongObj = null;
+  for (const artistObj of appData) {
+    currentSongObj = artistObj.songs.find(song => song.name === currentSongTitle);
+    if (currentSongObj) break;
+  }
+
+  const rightContainer = document.querySelector('.rightContainer');
+  rightContainer.innerHTML = `<div class="chordsContainer"></div>`;
+
+  // Add this block to create the title for the current song
+  const titleDiv = document.createElement('div');
+  titleDiv.className = 'title';
+  titleDiv.textContent = currentSongTitle || "Untitled";
+  rightContainer.prepend(titleDiv);
+
+  const container = document.querySelector('.rightContainer .chordsContainer');
+  container.innerHTML = ""; // Clear previous content
+
+  // Always add the "Original Key" span at the top
+  const oriKeySpan = document.createElement('span');
+  oriKeySpan.innerHTML = `Original Key: <span class="originalKey">${currentSongObj?.originalKey || 'Unknown'}</span>`;
+  container.appendChild(oriKeySpan);
+
+
+  // Beats per bar
+  const beatDisplay = document.createElement('span');
+  beatDisplay.innerHTML = `Beats Per Bar: <span class="beatSpan">${currentSongObj?.beatsPerBar || '4'}</span>`;
+  beatDisplay.style.fontSize = '30px';
+  if (window.innerWidth < 600) {
+    beatDisplay.style.fontSize = '13px';
+  }
+  container.appendChild(beatDisplay);
+
+  // Add the chordsperrow span
+  const chordsPerRowSpan = document.createElement('span');
+  chordsPerRowSpan.innerHTML = `Chords Per Row: <span class="chordsPerRow">${currentSongObj?.chordsPerRow || '4'}</span>`;
+  chordsPerRowSpan.style.fontSize = '30px';
+  if (window.innerWidth < 600) {
+    chordsPerRowSpan.style.fontSize = '13px';
+  }
+  container.appendChild(chordsPerRowSpan);
+
+  container.querySelector('.beatSpan').ondblclick = function (e) {
+    e.preventDefault();
+    recordState();
+    const newBeatSpan = prompt('Enter The New Beats Per Bar:');
+    if (newBeatSpan !== "") {
+      currentSongObj.beatsPerBar = newBeatSpan;
+      saveData();
+      renderUI();
+    }
+  }
+
+  // Set the original key on hold tap
+  container.querySelector('.beatSpan').addEventListener('touchstart', function (e) {
+    // Start the timer
+    e.preventDefault();
+    holdTimeout = setTimeout(() => {
+      recordState();
+      const newBeatSpan = prompt('Enter The New Beats Per Bar');
+      if (newBeatSpan !== "") {
+        currentSongObj.beatsPerBar = newBeatSpan;
+        saveData();
+        renderUI();
+      }
+    }, holdTapThreshold);
+  });
+  container.querySelector('.beatSpan').addEventListener('touchend', function () {
+    // Cancel if released early
+    clearTimeout(holdTimeout);
+  });
+  container.querySelector('.beatSpan').addEventListener('touchmove', function () {
+    // Cancel if they move finger
+    clearTimeout(holdTimeout);
+  });
+
+
+  // --- Handle Chords Per Row Editing ---
+  function editChordsPerRowPrompt() {
+    recordState();
+    const newChordsPerRow = prompt('Enter the number of chords per row (1–10):');
+    const value = parseInt(newChordsPerRow, 10);
+    if (!isNaN(value) && value > 0 && value <= 10) {
+      currentSongObj.chordsPerRow = value;
+      saveData().then(renderUI);
+    }
+    else if (newChordsPerRow !== null) {
+      alert("Please enter a valid number between 1 and 10.");
+    }
+  }
+
+
+  container.querySelector('.chordsPerRow').ondblclick = async function (e) {
+    e.preventDefault();
+    editChordsPerRowPrompt();
+  }
+  // Edit chords per row on hold tap
+  container.querySelector('.chordsPerRow').addEventListener('touchstart', async function (e) {
+    // Start the timer
+    holdTimeout = setTimeout(() => {
+      e.preventDefault();
+      editChordsPerRowPrompt();
+    }, holdTapThreshold);
+  });
+  container.querySelector('.chordsPerRow').addEventListener('touchend', function () {
+    // Cancel if released early
+    clearTimeout(holdTimeout);
+  });
+
+  container.querySelector('.chordsPerRow').addEventListener('touchmove', function () {
+    // Cancel if they move finger
+    clearTimeout(holdTimeout);
+  });
+
+
+  // Key Container
+  if (Array.isArray(window.keyList)) {
+    const keyContainer = document.createElement('div');
+    keyContainer.className = 'keyContainer';
+    window.keyList.forEach(key => {
+      const keyBtn = document.createElement('button');
+      keyBtn.className = 'key';
+      keyBtn.textContent = key;
+      if (keyBtn.textContent === 'Num') {
+        keyBtn.classList.add('numKey');
+      }
+      // Highlight the selected key
+      if (key === (currentSongObj?.currentKey || currentSongObj?.originalKey)) {
+        keyBtn.classList.add('selectedKey');
+      }
+      else if (key === 'Num' && localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true') {
+        keyBtn.classList.add('selectedNumKey');
+      }
+      // Desktop click event
+      keyBtn.addEventListener('click', async function () {
+        recordState();
+        if (currentSongObj) {
+          if (keyBtn.textContent === 'Num') {
+            const current = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
+            localStorage.setItem(`nashvilleMode_${currentUser}`, (!current).toString());
+          }
+          else {
+            currentSongObj.currentKey = key; // Store the selected key
+          }
+          await saveData();
+          renderUI(); // Re-render the UI to reflect the new key
+        }
+      });
+
+      // Mobile touch event
+      keyBtn.addEventListener('touchstart', async function (e) {
+        e.preventDefault(); // Prevent default touch behavior
+        recordState();
+        if (currentSongObj) {
+          if (keyBtn.textContent === 'Num') {
+            const current = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
+            localStorage.setItem(`nashvilleMode_${currentUser}`, (!current).toString());
+          }
+          else {
+            currentSongObj.currentKey = key; // Store the selected key
+          }
+          await saveData();
+          renderUI(); // Re-render the UI to reflect the new key
+        }
+      });
+      keyContainer.appendChild(keyBtn);
+    });
+
+    const rightContainer = document.querySelector('.rightContainer');
+    rightContainer.insertBefore(keyContainer, container); // Insert above chordsContainer
+  }
+
+  // Chord Sections Display
+  chordsPerRow = currentSongObj?.chordsPerRow || 4;
+  if (container && currentSongObj && Array.isArray(currentSongObj.chords)) {
+    currentSongObj.chords.forEach(section => {
+      const songSectionContainer = document.createElement('div');
+      songSectionContainer.className = 'songSectionContainer';
+
+      const sectionTitle = document.createElement('div');
+      sectionTitle.className = 'sectionTitle';
+      sectionTitle.textContent = section.section;
+      songSectionContainer.appendChild(sectionTitle);
+
+      const chords = document.createElement('div');
+      chords.className = 'chords';
+
+      for (let i = 0; i < section.chords.length; i += chordsPerRow) {
+        const rowDiv = document.createElement('div');
+        rowDiv.className = 'chord-row';
+
+        // Add starting line
+        const startLine = document.createElement('span');
+        startLine.className = 'line';
+        startLine.textContent = '|';
+        rowDiv.appendChild(startLine);
+
+        for (let j = 0; j < chordsPerRow && (i + j) < section.chords.length; j++) {
+
+          const chordSpan = document.createElement('span');
+          chordSpan.className = 'chord';
+
+          const fromKey = currentSongObj.originalKey;
+          const toKey = currentSongObj.currentKey || fromKey;
+          const displayChord = transposeChordLine(section.chords[i + j], fromKey, toKey);
+
+          chordSpan.textContent = displayChord;
+          rowDiv.appendChild(chordSpan);
+
+          const line = document.createElement('span');
+          line.className = 'line';
+          line.textContent = '|';
+          rowDiv.appendChild(line);
+        }
+
+        chords.appendChild(rowDiv);
+      }
+
+      // Add Edit Button
+      const editBtn = document.createElement('button');
+      editBtn.className = 'editBtn';
+
+      // Add Chord Buttons
+      const addChordBtn = document.createElement('button');
+      addChordBtn.className = 'addChordBtn';
+      addChordBtn.textContent = '+';
+      addChordBtn.addEventListener('click', function () {
+        recordState();
+        if (currentSongObj) {
+          if (!Array.isArray(currentSongObj.chords)) {
+            currentSongObj.chords = [];
+          }
+          // Determine number of beats per bar (default to 4 if not set)
+          const beats = parseInt(currentSongObj.beatsPerBar, 10) || 4;
+          const dots = Array(beats).fill('•').join(' ');
+          section.chords.push(dots);
+          saveData();
+          renderUI();
+        }
+      });
+
+
+      // Delete Section Button
+      const deleteSectionBtn = document.createElement('button');
+      deleteSectionBtn.className = 'deleteSectionBtn';
+      deleteSectionBtn.textContent = '🗑️';
+      deleteSectionBtn.addEventListener('click', function () {
+        recordState();
+        if (currentSongObj) {
+          const idx = currentSongObj.chords.indexOf(section);
+          if (idx > -1) {
+            currentSongObj.chords.splice(idx, 1);
+            saveData();
+            renderUI();
+          }
+        }
+      });
+
+      chords.appendChild(editBtn);
+      editBtn.appendChild(addChordBtn);
+      editBtn.appendChild(deleteSectionBtn);
+      songSectionContainer.appendChild(chords);
+
+      container.appendChild(songSectionContainer);
+    });
+
+
+    // Double click to edit chords
+    const chordSpans = container.querySelectorAll('.chord');
+    chordSpans.forEach(chordSpan => {
+      chordSpan.addEventListener('dblclick', function (e) {
+        e.preventDefault();
+        chordSpan.contentEditable = true;
+        chordSpan.focus();
+      });
+      // Double tap to edit chord
+      chordSpan.addEventListener('touchend', function () {
+        const currentTime = new Date().getTime();
+        const tapLength = currentTime - lastTap;
+
+        if (tapLength < dblTapThreshold && tapLength > 0) {
+          chordSpan.contentEditable = true;
+          chordSpan.focus();
+          document.execCommand('selectAll', false, null);
+        }
+        lastTap = currentTime;
+      });
+      // Go to next chord on Enter key
+      chordSpan.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          e.preventDefault(); // Prevent default Enter behavior
+          setTimeout(() => chordSpan.blur(), 0);
+          // Find all chord spans in the current section
+          const section = chordSpan.closest('.songSectionContainer');
+          const allSections = Array.from(container.querySelectorAll('.songSectionContainer'));
+          const sectionIdx = allSections.indexOf(section);
+          const allChords = Array.from(section.querySelectorAll('.chord'));
+          const idx = allChords.indexOf(chordSpan);
+
+          // Focus the next chord in the section, if it exists
+          if (idx > -1 && idx < allChords.length - 1) {
+            nextChordFocus = { sectionIdx, chordIdx: idx + 1 };
+          } else if (sectionIdx < allSections.length - 1) {
+            nextChordFocus = { sectionIdx: sectionIdx + 1, chordIdx: 0 };
+          } else {
+            nextChordFocus = null; // No next chord to focus
+          }
+          chordSpan.blur();
+        }
+      });
+      // Set the chordSpan to be uneditable
+      chordSpan.addEventListener('blur', function () {
+        recordState();
+        chordSpan.contentEditable = false;
+
+        const section = chordSpan.closest('.songSectionContainer');
+        const allSections = Array.from(container.querySelectorAll('.songSectionContainer'));
+        const sectionIdx = allSections.indexOf(section);
+        const chordIdx = Array.from(section.querySelectorAll('.chord')).indexOf(chordSpan);
+
+        const chordText = chordSpan.textContent.trim();
+
+        const originalKey = currentSongObj.originalKey || "C";
+        const selectedKey = currentSongObj.currentKey || originalKey;
+
+        if (!currentSongObj) return;
+
+        // If the chordSpan is empty, remove it
+        if (chordText === '') {
+          if (currentSongObj && currentSongObj.chords[sectionIdx] && currentSongObj.chords[sectionIdx].chords) {
+            currentSongObj.chords[sectionIdx].chords.splice(chordIdx, 1);
+            // Remove the line
+            const line = chordSpan.previousElementSibling;
+            if (line && line.classList.contains('line')) {
+              line.remove();
+            }
+
+            chordSpan.remove();
+
+            // Remove the section if no chords left
+            if (currentSongObj.chords[sectionIdx].chords.length === 0) {
+              currentSongObj.chords.splice(sectionIdx, 1);
+            }
+          }
+        }
+        else {
+          const numberRegex = /^([1-7])([b#]?)(.*)$/;
+          const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
+
+          if (numberRegex.test(chordText) && !nashvilleMode) {
+            const [, number, accidental, suffix] = chordText.match(numberRegex);
+            const converted = transposeChord(number + accidental + suffix, 'C', selectedKey);
+            currentSongObj.chords[sectionIdx].chords[chordIdx] = transposeChord(converted, selectedKey, originalKey);
+            chordSpan.textContent = converted;
+          }
+          else {
+            const chordInOriginalKey = transposeChord(chordText, selectedKey, originalKey);
+            currentSongObj.chords[sectionIdx].chords[chordIdx] = chordInOriginalKey;
+            chordSpan.textContent = transposeChord(chordInOriginalKey, originalKey, selectedKey);
+          }
+        }
+        saveData();
+        renderUI();
+      });
+    });
+
+
+    // Only one <hr> at the bottom
+    const hr = document.createElement('hr');
+    container.appendChild(hr);
+
+
+    // Add chord section button
+    const addChordSectionBtn = document.createElement('button');
+    addChordSectionBtn.className = 'addChordSectionBtn';
+    addChordSectionBtn.textContent = '+';
+
+    addChordSectionBtn.addEventListener('click', function () {
+      recordState();
+      if (currentSongObj) {
+        if (!Array.isArray(currentSongObj.chords)) {
+          currentSongObj.chords = [];
+        }
+        if (currentSongObj && currentSongObj.beatsPerBar) {
+          beatsPerBar = parseInt(currentSongObj.beatsPerBar, 10) || 4;
+        }
+        // Create the correct number of dots for the beats per bar
+        const dots = Array(beatsPerBar).fill('•').join(' ');
+        currentSongObj.chords.push({ section: "New Section", chords: [dots] });
+        saveData();
+        renderUI();
+      }
+    });
+    container.appendChild(addChordSectionBtn);
+
+
+    // Rename Chord Section
+    const songSections = document.querySelectorAll('.sectionTitle');
+    songSections.forEach(section => {
+      section.addEventListener('dblclick', function () {
+        section.contentEditable = true
+        section.focus();
+        section.addEventListener('keydown', function (e) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            section.blur();
+          }
+        });
+        section.addEventListener('blur', function () {
+          recordState();
+          const sectionTitle = section.textContent;
+          if (sectionTitle !== null && sectionTitle.trim() !== "") {
+            const idx = Array.from(songSections).indexOf(section);
+            currentSongObj.chords[idx].section = sectionTitle;
+            saveData();
+            renderUI();
+          }
+        });
+      });
+      section.addEventListener('touchend', function () {
+        const currentTime = new Date().getTime();
+        const tapLength = currentTime - lastTap;
+
+        if (tapLength < dblTapThreshold && tapLength > 0) {
+          section.contentEditable = true
+          section.focus();
+          section.addEventListener('keydown', function (e) {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              section.blur();
+            }
+          });
+          section.addEventListener('blur', function () {
+            recordState();
+            const sectionTitle = section.textContent;
+            if (sectionTitle !== null && sectionTitle.trim() !== "") {
+              const idx = Array.from(songSections).indexOf(section);
+              currentSongObj.chords[idx].section = sectionTitle;
+              saveData();
+              renderUI();
+            }
+          });
+        }
+        lastTap = currentTime;
+      });
+    });
+  }
+  else {
+    // If no chords exist, create a default section
+    const songSectionContainer = document.createElement('div');
+    songSectionContainer.className = 'songSectionContainer';
+
+    const chords = document.createElement('div');
+    chords.className = 'chords';
+
+    // Add chord section button
+    const addChordSectionBtn = document.createElement('button');
+    addChordSectionBtn.className = 'addChordSectionBtn';
+    addChordSectionBtn.textContent = '+';
+
+    addChordSectionBtn.addEventListener('click', function () {
+      if (currentSongObj) {
+        if (!Array.isArray(currentSongObj.chords)) {
+          currentSongObj.chords = [];
+        }
+        currentSongObj.chords.push({ section: "New Section", chords: ["• • • •"] });
+        saveData();
+        renderUI();
+      }
+    });
+
+    const hr = document.createElement('hr');
+    songSectionContainer.appendChild(hr);
+
+    songSectionContainer.appendChild(addChordSectionBtn);
+    songSectionContainer.appendChild(chords);
+
+    container.appendChild(songSectionContainer);
+  }
+
+  // Notes section below
+  const notesContainer = document.createElement('div');
+  notesContainer.className = 'notesContainer';
+  container.appendChild(notesContainer);
+
+  const notesTitle = document.createElement('div');
+  notesTitle.className = 'notesTitle';
+  notesTitle.textContent = 'Notes';
+  notesContainer.appendChild(notesTitle);
+
+  const notesArea = document.createElement('textarea');
+  notesArea.className = 'notesArea';
+  notesArea.placeholder = 'Add any notes about the song here...';
+  if (currentSongObj && currentSongObj.notes) {
+    notesArea.value = currentSongObj.notes;
+  }
+  notesContainer.appendChild(notesArea);
+
+  // Store original value on focus
+  let originalNotes = '';
+  notesArea.addEventListener('focus', function () {
+    originalNotes = notesArea.value;
+  });
+
+  // Save changes when blurring the textarea
+  notesArea.addEventListener('blur', function () {
+    if (notesArea.value !== originalNotes) {
+      recordState();
+      if (currentSongObj) {
+        currentSongObj.notes = notesArea.value;
+        saveData();
+      }
+    }
+  });
+
+  // Add scroll listener for songMapContainer
+  addScrollListener();
+
+
+  // Set the original key for each song
+  const keyContainer = document.querySelector('.keyContainer');
+  const oriKey = currentSongObj ? currentSongObj.originalKey : 'Unknown';
+  const originalKeySpan = document.querySelector('.originalKey');
+  if (originalKeySpan) {
+    originalKeySpan.textContent = oriKey; // Display the original key
+  }
+
+  if (keyContainer) {
+    keyContainer.querySelectorAll('.key').forEach(btn => {
+      // Highlight the original key button on render
+      if (btn.textContent === oriKey) {
+        btn.style.backgroundColor = '#1b61d1';
+      }
+      else {
+        btn.style.backgroundColor = '';
+      }
+
+      // Set the original key on double-click
+      btn.ondblclick = function () {
+        if (currentSongObj && btn.textContent !== 'Num') {
+          currentSongObj.originalKey = btn.textContent; // Set per-song original key
+          saveData(); // Save to localStorage
+          renderUI(); // Re-render to update UI (which will handle highlighting)
+        }
+      };
+      // Set the original key on hold tap
+      btn.addEventListener('touchstart', function (e) {
+        // Start the timer
+        e.preventDefault();
+        holdTimeout = setTimeout(() => {
+          if (currentSongObj && btn.textContent !== 'Num') {
+            currentSongObj.originalKey = btn.textContent; // Set per-song original key
+            saveData(); // Save to localStorage
+            renderUI(); // Re-render to update UI (which will handle highlighting)
+          }
+        }, holdTapThreshold);
+      });
+      btn.addEventListener('touchend', function () {
+        // Cancel if released early
+        clearTimeout(holdTimeout);
+      });
+
+      btn.addEventListener('touchmove', function () {
+        // Cancel if they move finger
+        clearTimeout(holdTimeout);
+      });
+    });
+  }
+
+  const songMapContainer = document.querySelector('.songMapContainer');
+  songMapContainer.style.display = 'block';
+
+  // Add chordsContainer for artists and their songs
+  const artistContainer = document.createElement('div');
+  artistContainer.className = 'artistContainer';
+  leftContainer.appendChild(artistContainer);
+
+  // Loop through each artist in appData
+  if (Array.isArray(appData)) {
+    appData.forEach(artistObj => {
+      // Artist Name
+      const artistName = document.createElement('div');
+      artistName.className = 'artistName';
+      artistName.textContent = artistObj.artist;
+      artistContainer.appendChild(artistName);
+
+      // Dropdown menu for songs
+      const dropdownMenu = document.createElement('ul');
+      dropdownMenu.className = 'dropdown-menu';
+      dropdownMenu.style.display = 'none'; // Hide by default
+      artistContainer.appendChild(dropdownMenu);
+
+      // Add each song as a list item
+      artistObj.songs.forEach(song => {
+        const li = document.createElement('li');
+        li.className = 'songName';
+        li.textContent = song.name;
+        dropdownMenu.appendChild(li);
+
+        // Click event to set as current song
+        li.addEventListener('click', function () {
+          localStorage.setItem(`currentSongTitle_${currentUser}`, song.name);
+          const title = document.querySelector('.title');
+          if (title) title.textContent = song.name;
+          liveContainer.style.display = 'none'; // Hide the dropdown after selection
+          const rightContainer = document.querySelector('.rightContainer');
+          if (rightContainer) rightContainer.innerHTML = `<div class="chordsContainer"></div>`;
+          saveData(); // Save the current song title
+          renderUI(); // Re-render UI to reflect changes
+        });
+      });
+
+      // Toggle dropdown on artist name click
+      artistName.addEventListener('click', function () {
+        dropdownMenu.style.display = dropdownMenu.style.display === 'none' ? 'block' : 'none';
+      });
+    });
+  }
+
+
+  // Add Song Map Part Button
+  const addPartBtn = document.querySelector('.addPartBtn');
+  if (addPartBtn) {
+    addPartBtn.replaceWith(addPartBtn.cloneNode(true));
+    const newAddPartBtn = document.querySelector('.addPartBtn');
+    newAddPartBtn.addEventListener('click', function () {
+      recordState();
+      if (currentSongObj) {
+        if (!Array.isArray(currentSongObj.songMap)) currentSongObj.songMap = [];
+        currentSongObj.songMap.push('Unknown');
+        localStorage.setItem(`openMapForSong_${currentUser}`, songObj.name);
+        // update UI immediately
+        renderSongMap(currentSongObj.songMap);
+        // schedule background save
+        scheduleSave();
+      }
+    });
+  }
+
+
+  // Song Map Editing
+  function renderSongMap(songMap) {
+    const songMapList = document.querySelector('.songMapList');
+    songMapList.innerHTML = '';
+
+    songMap.forEach((partText, index) => {
+      const part = document.createElement('li');
+      part.className = 'songMapPart';
+      part.textContent = partText;
+      part.setAttribute('draggable', 'true');
+
+      // === Editing ===
+      let lastTap = 0;
+      part.addEventListener('dblclick', () => startEditing(part, index));
+      part.addEventListener('touchend', () => {
+        const now = Date.now();
+        if (now - lastTap < 300) startEditing(part, index);
+        lastTap = now;
+      });
+
+      // === Desktop Drag ===
+      part.addEventListener('dragstart', (e) => {
+        // record snapshot once at drag start so undo can restore pre-drag order
+        recordState();
+        e.dataTransfer.effectAllowed = 'move';
+        part.classList.add('dragging');
+      });
+      part.addEventListener('dragend', async () => {
+        part.classList.remove('dragging');
+        await saveReorder();
+      });
+
+      // === Mobile Drag ===
+      let startY = 0;
+      part.addEventListener('touchstart', (e) => {
+        // record snapshot once at touch start for mobile drag
+        recordState();
+        startY = e.touches[0].clientY;
+        part.classList.add('dragging');
+        e.preventDefault();
+      });
+      part.addEventListener('touchmove', (e) => {
+        const touchY = e.touches[0].clientY;
+        const after = getDragAfterElement(songMapList, touchY);
+        const dragging = document.querySelector('.dragging');
+        if (after == null) songMapList.appendChild(dragging);
+        else songMapList.insertBefore(dragging, after);
+      });
+      part.addEventListener('touchend', async () => {
+        part.classList.remove('dragging');
+        await saveReorder();
+      });
+
+      songMapList.appendChild(part);
+    });
+
+    // Shared dragover for desktop
+    songMapList.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const after = getDragAfterElement(songMapList, e.clientY);
+      const dragging = document.querySelector('.dragging');
+      if (!dragging) return;
+      if (after == null) songMapList.appendChild(dragging);
+      else songMapList.insertBefore(dragging, after);
+    });
+
+    function getDragAfterElement(container, y) {
+      const elements = [...container.querySelectorAll('.songMapPart:not(.dragging)')];
+      return elements.reduce((closest, el) => {
+        const box = el.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) {
+          return { offset, element: el };
+        } else {
+          return closest;
+        }
+      }, { offset: -Infinity }).element;
+    }
+
+    async function saveReorder() {
+      currentSongObj.songMap = [...songMapList.querySelectorAll('.songMapPart')].map(p => p.textContent.trim());
+      for (const artist of appData) {
+        const song = artist.songs.find(s => s.name === currentSongObj.name);
+        if (song) song.songMap = [...currentSongObj.songMap];
+      }
+      scheduleSave();
+    }
+
+    // --- Debounced background save (coalesce rapid edits) ---
+    let _saveTimeout = null;
+    const SAVE_DEBOUNCE_MS = 100; // tweak: 300-1000ms depending on desired responsiveness
+
+    function scheduleSave() {
+      // don't schedule while applying undo/redo snapshot
+      if (isApplyingHistory) return;
+      if (_saveTimeout) clearTimeout(_saveTimeout);
+      _saveTimeout = setTimeout(async () => {
+        _saveTimeout = null;
+        try {
+          await saveData(); // saveData exists in this file
+        } catch (err) {
+          console.warn('Background save failed:', err);
+        }
+      }, SAVE_DEBOUNCE_MS);
+    }
+
+    // Helpful immediate-save when you really need it
+    async function flushSave() {
+      if (_saveTimeout) {
+        clearTimeout(_saveTimeout);
+        _saveTimeout = null;
+      }
+      try {
+        await saveData();
+      } catch (err) {
+        console.warn('Flush save failed:', err);
+      }
+    }
+
+    // Replace saveEdit so it updates data and schedules background save (no await)
+    async function saveEdit(part, index, options = {}) {
+      const newValue = part.textContent.trim();
+
+      // Ensure songMap is an array
+      if (!Array.isArray(currentSongObj.songMap)) currentSongObj.songMap = [];
+
+      if (newValue === '') {
+        currentSongObj.songMap.splice(index, 1);
+      } else {
+        currentSongObj.songMap[index] = newValue;
+      }
+
+      // Sync with appData (synchronously)
+      for (const artist of appData) {
+        const song = artist.songs.find(s => s.name === currentSongObj.name);
+        if (song) {
+          if (!Array.isArray(song.songMap)) song.songMap = [];
+          song.songMap = [...currentSongObj.songMap];
+        }
+      }
+
+      // schedule background save instead of awaiting
+      scheduleSave();
+
+      // Only re-render the small map UI (not whole app) — reuse renderSongMap caller
+      if (!options.skipRender) {
+        // re-render just song map list
+        try {
+          renderSongMap(currentSongObj.songMap);
+        } catch (err) {
+          // fallback: full UI render if targeted render fails
+          renderUI();
+        }
+      }
+    }
+
+    // Faster Enter navigation: don't wait for save — move focus immediately, schedule save
+    function startEditing(part, index) {
+      recordState();
+      part.setAttribute('contentEditable', 'true');
+      part.focus();
+      document.execCommand('selectAll', false, null);
+      part.setAttribute('draggable', 'false');
+
+      // Remove any previous keydown listeners to avoid stacking
+      part.onkeydown = null;
+      part.onblur = null;
+
+      let navigatingToNext = false;
+
+      part.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          navigatingToNext = true;
+          // save edits locally and schedule persistence (no await)
+          await saveEdit(part, index, { skipRender: true });
+
+          // Move to next part if exists, focus immediately using rAF for UI responsiveness
+          requestAnimationFrame(() => {
+            const songMapList = document.querySelector('.songMapList');
+            const next = songMapList?.children[index + 1];
+            if (next && next.classList.contains('songMapPart')) {
+              part.removeAttribute('contentEditable');
+              part.setAttribute('draggable', 'true');
+              // focus next in next rAF to ensure DOM ready
+              requestAnimationFrame(() => startEditing(next, index + 1));
+            } else {
+              navigatingToNext = false;
+              part.blur();
+            }
+          });
+        }
+      });
+
+      part.addEventListener('beforeinput', async (e) => {
+        if (e.inputType === 'insertParagraph') {
+          e.preventDefault();
+          navigatingToNext = true;
+          await saveEdit(part, index, { skipRender: true });
+          requestAnimationFrame(() => {
+            const songMapList = document.querySelector('.songMapList');
+            const next = songMapList?.children[index + 1];
+            if (next && next.classList.contains('songMapPart')) {
+              part.removeAttribute('contentEditable');
+              part.setAttribute('draggable', 'true');
+              requestAnimationFrame(() => startEditing(next, index + 1));
+            } else {
+              navigatingToNext = false;
+              part.blur();
+            }
+          });
+        }
+      });
+
+      part.addEventListener('blur', async () => {
+        if (!navigatingToNext) {
+          part.removeAttribute('contentEditable');
+          part.setAttribute('draggable', 'true');
+          await saveEdit(part, index);
+        }
+      }, { once: true });
+    }
+  }
+  renderSongMap((currentSongObj && currentSongObj.songMap) || []);
+
+
+  // After rendering, check if nextChordFocus is set
+  if (nextChordFocus) {
+    const allSections = Array.from(container.querySelectorAll('.songSectionContainer'));
+    const section = allSections[nextChordFocus.sectionIdx];
+    if (section) {
+      const chords = section.querySelectorAll('.chord');
+      const nextChord = chords[nextChordFocus.chordIdx];
+      if (nextChord) {
+        nextChord.contentEditable = true;
+        nextChord.focus();
+        // Select all text of the next chord
+        document.execCommand('selectAll', false, null);
+        /* If it doessn't work, use this instead:
+        const range = document.createRange();
+        range.selectNodeContents(nextChord);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        */
+      }
+    }
+    nextChordFocus = null;
+  }
+}
+
+
+// Function to add scroll listener for songMapContainer
+let scrollListenerAdded = false;
+function addScrollListener() {
+  if (scrollListenerAdded) return;
+  scrollListenerAdded = true;
+
+  window.addEventListener('scroll', function () {
+    const notesContainer = document.querySelector('.notesContainer');
+    const songMapContainer = document.querySelector('.songMapContainer');
+    if (!songMapContainer) return;
+
+    const isMobile = window.innerWidth < 600 || 'ontouchstart' in window;
+
+    if (isMobile) {
+      const offset = 40; // small top offset for mobile
+      songMapContainer.style.position = 'fixed';
+      songMapContainer.style.top = offset + 'px';
+      songMapContainer.style.transform = 'none';
+      return;
+    }
+
+    if (!notesContainer) return;
+
+    const notesRect = notesContainer.getBoundingClientRect();
+    if (notesRect.top <= window.innerHeight) {
+      // Notes are in view, stop following
+      songMapContainer.style.position = 'absolute';
+      songMapContainer.style.top = (notesContainer.offsetTop - songMapContainer.offsetHeight - 60) + 'px';
+      songMapContainer.style.transform = 'none';
+    } else {
+      // Reset to fixed for desktop song map
+      songMapContainer.style.position = 'fixed';
+      songMapContainer.style.top = '50%';
+      songMapContainer.style.transform = 'translateY(-50%)';
+    }
+  });
+}
+
+
+// --- Intial Render ---
+renderUI();
+
+
+// --- Dark Mode ---
+async function darkMode() {
+  const user = firebase.auth().currentUser;
+  if (!user) return;
+
+  document.body.classList.toggle('dark-mode');
+  const isDarkMode = document.body.classList.contains('dark-mode'); // True if dark mode is active
+  const darkBtn = document.querySelector('#darkBtn');
+  if (darkBtn) {
+    if (isDarkMode) {
+      darkBtn.textContent = '☼';
+    }
+    else {
+      darkBtn.textContent = '☾⋆';
+    }
+    await firebase.firestore().collection('users').doc(user.uid).set({
+      darkMode: isDarkMode
+    }, { merge: true });
+  }
+}
+
+
+// --- Go To Home Page ---
+function home() {
+  window.location.href = 'Home-index.html';
+}
+
+
+// --- Hide/Show Data ---
+
+function hideShow() {
+  const container = document.querySelector('.leftContainer');
+  const buttons = document.querySelectorAll('.menuBtn');
+  const menu = document.querySelector('.menu');
+
+  if (container.style.display === 'none' || container.style.display === '') {
+    container.style.display = 'block';
+    document.body.classList.add('dimmed');
+    if (window.innerWidth < 600) {
+      buttons.forEach(button => {
+        button.style.display = 'block';
+        button.style.fontSize = '34px';
+        button.style.margin = '10px';
+      });
+      menu.style.width = '38px';
+      menu.style.height = '100%';
+    }
+  }
+  else {
+    container.style.display = 'none';
+    document.body.classList.remove('dimmed');
+
+    if (window.innerWidth < 600) {
+      buttons.forEach(button => {
+        button.style.display = 'none';
+        button.style.fontSize = '18px';
+        button.style.margin = '0';
+        document.getElementById('hideShowBtn').style.display = 'block'
+      });
+      menu.style.width = '20px';
+      menu.style.height = '22px';
+    }
+  }
+}
+// Hide the container if you click outside of it
+document.addEventListener('click', function (e) {
+  const container = document.querySelector('.leftContainer');
+
+  // If the container is not visible, do nothing
+  if (!container || container.style.display === 'none') return;
+
+  // If the click is outside the container and not on the button that shows it
+  if (!container.contains(e.target) && !e.target.matches('#hideShowBtn')) {
+    container.style.display = 'none';
+    document.body.classList.remove('dimmed');
+  }
+});
+
+document.addEventListener('touchstart', function (e) {
+  const container = document.querySelector('.leftContainer');
+  const buttons = document.querySelectorAll('.menuBtn');
+  const menu = document.querySelector('.menu');
+
+  // If the container is not visible, do nothing
+  if (!container || container.style.display === 'none') return;
+
+  // If the user presses one of the button in the menu except the hideShowBtn
+  if (menu.contains(e.target) && !e.target.matches('#hideShowBtn')) {
+    setTimeout(() => {
+      container.style.display = 'none';
+      document.body.classList.remove('dimmed');
+
+      buttons.forEach(button => {
+        button.style.display = 'none';
+        button.style.fontSize = '18px';
+        button.style.margin = '0';
+        document.getElementById('hideShowBtn').style.display = 'block'
+      });
+      menu.style.width = '20px';
+      menu.style.height = '22px';
+    }, 300);
+  }
+  // If the click is outside the container and not on the button that shows it
+  else if (!container.contains(e.target) && !e.target.matches('#hideShowBtn')) {
+    container.style.display = 'none';
+    document.body.classList.remove('dimmed');
+
+    buttons.forEach(button => {
+      button.style.display = 'none';
+      button.style.fontSize = '18px';
+      button.style.margin = '0';
+      document.getElementById('hideShowBtn').style.display = 'block'
+    });
+    menu.style.width = '20px';
+    menu.style.height = '22px';
+  }
+});
+
+
+
+// --- Manual Page ---
+function manual() {
+  window.location.href = 'manual.html';
+}
