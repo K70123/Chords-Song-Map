@@ -329,8 +329,9 @@ function renderUI() {
       songItem.appendChild(songName);
 
       // Add click event to update the current song title
-      songLink.onclick = async (e) => {
-        e.preventDefault(); // Prevent default link behavior
+      songLink.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         // mark that the user wants the original view and which song to open
         localStorage.setItem(`currentSongTitle_${currentUser}`, song.name);
         localStorage.setItem(`liveSection_${currentUser}`, 'false');
@@ -338,7 +339,7 @@ function renderUI() {
         // persist any pending changes (liveSongs/liveSongsData/appData) before navigation
         await saveData();
         window.location.href = song.url; // Navigate to the song URL
-      };
+      });
 
       // Song edit buttons
       const editBtn = document.createElement('span');
@@ -474,6 +475,7 @@ function renderUI() {
 
       // Hold tap the song name to show edit buttons
       songName.addEventListener('touchstart', function (e) {
+        e.stopPropagation();
         // Start the timer
         holdTimeout = setTimeout(() => {
           e.preventDefault(); // Prevent default link behavior
@@ -521,7 +523,8 @@ function renderUI() {
       });
     };
 
-    artistDiv.ontouchstart = () => {
+    artistDiv.ontouchstart = (e) => {
+      e.stopPropagation();
       const currentTime = Date.now();
       const timeDiff = currentTime - lastTap;
 
@@ -658,11 +661,12 @@ let holdTimer;
 
 const liveBtnContainer = document.querySelector('.live-btn-container');
 liveBtnContainer.ontouchstart = (e) => {
+  e.stopPropagation();
   holdTimer = setTimeout(() => {
-    if (liveBtnContainer.style.display !== 'block'){
+    if (liveBtnContainer.style.display !== 'block') {
       e.preventDefault(); // Prevent the click event if it's a hold
       showLiveHover();
-    } 
+    }
   }, 1000);
 };
 document.querySelector('.container').ontouchstart = () => {
@@ -673,8 +677,8 @@ document.querySelector('.container').ontouchstart = () => {
 function showLiveHover() {
   const dropdown = document.getElementById('liveDropdown');
   if (!dropdown) return;
-  
-  dropdown.innerHTML = ''; 
+
+  dropdown.innerHTML = '';
 
   if (liveSongs.length === 0) {
     dropdown.innerHTML = '<div class="live-hover-item">No live songs</div>';
@@ -690,7 +694,7 @@ function showLiveHover() {
         localStorage.setItem(`currentSongTitle_${currentUser}`, songTitle);
         localStorage.setItem(`openMapForSong_${currentUser}`, songTitle);
         localStorage.setItem(`liveSection_${currentUser}`, 'false');
-        
+
         await saveData();
         window.location.href = "Main Page.html";
       };
@@ -711,7 +715,7 @@ function showLiveHover() {
       // MOBILE: Touch Logic
       item.ontouchstart = () => {
         holdTimer = setTimeout(() => {
-          holdTimer = null; 
+          holdTimer = null;
           deleteLiveSong(index);
         }, 2000);
       };
@@ -720,11 +724,11 @@ function showLiveHover() {
         if (holdTimer) {
           clearTimeout(holdTimer);
           holdTimer = null;
-          e.preventDefault(); 
+          e.preventDefault();
           navigateToSong();
         }
       };
-      
+
       item.ontouchcancel = () => clearTimeout(holdTimer);
 
       dropdown.appendChild(item);
