@@ -562,9 +562,10 @@ ul {
 
     .songMapContainer,
     .liveSongMapContainer {
-        padding: 2px;
-        width: 90px;
-        height: 300px;
+        padding: 1px;
+        padding-top: 2px;
+        width: 80px;
+        height: 400px;
         right: 0;
         border: 0.2px 0.2px solid;
     }
@@ -655,9 +656,13 @@ ul {
     }
 
     .notesContainer {
-        margin-top: 40px;
-        width: 80%;
+        margin-top: 20px;
+        max-width: 75%;
+        margin-left: 1%;
+        margin-right: 230px;
         margin-bottom: 50px;
+        align-self: flex-start;
+        position: relative;
     }
 
     .notesTitle {
@@ -666,7 +671,7 @@ ul {
 
     .notesArea {
         width: 90%;
-        min-height: 80px;
+        min-height: 100px;
         padding: 5px;
         margin: 10px;
         font-size: 14px;
