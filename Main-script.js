@@ -2329,17 +2329,10 @@ function addScrollListener() {
     const songMapContainer = document.querySelector('.songMapContainer');
     if (!songMapContainer) return;
 
-    /* 
     const isMobile = window.innerWidth < 600 || 'ontouchstart' in window;
 
-    if (isMobile) {
-      const offset = 40; // small top offset for mobile
-      songMapContainer.style.position = 'fixed';
-      songMapContainer.style.top = offset + 'px';
-      songMapContainer.style.transform = 'none';
-      return;
-    }
-    */
+    if (isMobile) return; // Don't apply this behavior on mobile
+
     if (!notesContainer) return;
 
     const notesRect = notesContainer.getBoundingClientRect();
