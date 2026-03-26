@@ -1941,9 +1941,6 @@ function renderUI() {
     }
   });
 
-  // Add scroll listener for songMapContainer
-  addScrollListener();
-
 
   // Set the original key for each song
   const keyContainer = document.querySelector('.keyContainer');
@@ -2315,39 +2312,6 @@ function renderUI() {
     }
     nextChordFocus = null;
   }
-}
-
-
-// Function to add scroll listener for songMapContainer
-let scrollListenerAdded = false;
-function addScrollListener() {
-  if (scrollListenerAdded) return;
-  scrollListenerAdded = true;
-
-  window.addEventListener('scroll', function () {
-    const notesContainer = document.querySelector('.notesContainer');
-    const songMapContainer = document.querySelector('.songMapContainer');
-    if (!songMapContainer) return;
-
-    const isMobile = window.innerWidth < 600 || 'ontouchstart' in window;
-
-    if (isMobile) return; // Don't apply this behavior on mobile
-
-    if (!notesContainer) return;
-
-    const notesRect = notesContainer.getBoundingClientRect();
-    if (notesRect.top <= window.innerHeight) {
-      // Notes are in view, stop following
-      songMapContainer.style.position = 'absolute';
-      songMapContainer.style.top = (notesContainer.offsetTop - songMapContainer.offsetHeight - 60) + 'px';
-      songMapContainer.style.transform = 'none';
-    } else {
-      // Reset to fixed for desktop song map
-      songMapContainer.style.position = 'fixed';
-      songMapContainer.style.top = '50%';
-      songMapContainer.style.transform = 'translateY(-50%)';
-    }
-  });
 }
 
 
