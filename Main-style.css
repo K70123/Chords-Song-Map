@@ -462,8 +462,11 @@ ul {
     flex-direction: column;
     align-items: center;
     border: 1px solid #757678;
-    width: 80%;
+    width: 75%;
     margin-bottom: 50px;
+    margin-left: 6%;
+    align-self: flex-start;
+    position: relative;
 }
 
 .notesTitle {
