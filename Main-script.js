@@ -2329,6 +2329,7 @@ function addScrollListener() {
     const songMapContainer = document.querySelector('.songMapContainer');
     if (!songMapContainer) return;
 
+    /* 
     const isMobile = window.innerWidth < 600 || 'ontouchstart' in window;
 
     if (isMobile) {
@@ -2338,7 +2339,7 @@ function addScrollListener() {
       songMapContainer.style.transform = 'none';
       return;
     }
-
+    */
     if (!notesContainer) return;
 
     const notesRect = notesContainer.getBoundingClientRect();
