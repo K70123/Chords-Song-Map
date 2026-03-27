@@ -33,6 +33,70 @@ button {
   font-size: 40px;
 }
 
+.search-container {
+  width: 96%;
+  max-width: 1000px;
+  margin: 0 auto 20px;
+  position: relative;
+}
+
+#songSearchInput {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 20px;
+  padding: 10px 14px;
+  border: 2px solid #ccc;
+  border-radius: 8px;
+}
+
+.search-results {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #ccc;
+  border-top: none;
+  z-index: 1200;
+  max-height: 240px;
+  overflow-y: auto;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+.search-result-item {
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+  cursor: pointer;
+  font-size: 17px;
+}
+
+.search-result-item:hover {
+  background: #f2f2f2;
+}
+
+.search-results .empty {
+  padding: 10px;
+  color: #777;
+  font-size: 16px;
+}
+
+.dark-mode .search-results {
+  background: #1f1f1f;
+  border-color: #444;
+}
+
+.dark-mode #songSearchInput {
+  background: #121212;
+  color: white;
+  border-color: #444;
+}
+
+.dark-mode .search-result-item:hover {
+  background: #2d2d2d;
+}
+
 .container {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -86,7 +150,7 @@ button {
 .live-btn-container {
   position: fixed;
   bottom: 22px;
-  left: 60px;
+  left: 45px;
   z-index: 1100;
   display: inline-block;
   flex-direction: column;
@@ -112,7 +176,7 @@ button {
   opacity: 0.95;
   border: 1px solid #444;
   border-radius: 8px;
-  min-width: 170px;
+  min-width: 190px;
   max-height: 300px;
   overflow-y: auto;
   z-index: 1000;
@@ -128,8 +192,42 @@ button {
   color: white;
   text-align: left;
   user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   /* Prevents text selection during long-press */
+
+  /* Prevents the 🚫 icon by disabling text selection while dragging */
+  user-select: none;
+  -webkit-user-drag: element;
 }
+
+.live-drag-handle {
+  cursor: grab;
+  display: inline-block;
+  margin-right: 8px;
+  font-size: 18px;
+  padding: 1px;
+  color: #e4e4e4;
+  user-select: none;
+}
+
+.live-hover-item.drag-over {
+  background-color: rgba(0, 153, 255, 0.25);
+}
+
+.live-hover-item.dragging {
+  opacity: 0.5;
+  background: #444;
+}
+
+.live-song-title {
+  flex-grow: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 
 .live-hover-item:hover {
   background: #333;
@@ -261,7 +359,7 @@ a {
   #title {
     font-size: 23px;
     text-align: center;
-    margin-bottom: 40px;
+    margin-bottom: 12px;
     font-weight: bold;
   }
 
@@ -362,5 +460,26 @@ a {
   .editBtn button {
     font-size: 10px;
     padding: 1px 1px;
+  }
+
+  .search-container {
+    width: 96%;
+    max-width: 1000px;
+    margin: 0 auto 20px;
+  }
+
+  #songSearchInput {
+    width: 100%;
+    font-size: 15px;
+    padding: 10px 10px;
+  }
+
+  .search-results {
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 240px;
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
   }
 }
