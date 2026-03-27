@@ -463,6 +463,8 @@ a {
   .editBtn {
     margin-top: 5px;
     margin-bottom: 10px;
+    pointer-events: auto;
+    z-index: 9999;
   }
 
   .editBtn button {
