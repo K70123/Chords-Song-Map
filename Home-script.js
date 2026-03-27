@@ -19,6 +19,90 @@ let currentUser = null; // Will store the user UID
 let liveSongs = [];
 let liveSongsData = {}; // Object to store live songs data
 
+function goToMainSong(artistName, songName) {
+  if (!currentUser) return;
+  // preselect song and keep portal to live section
+  localStorage.setItem(`currentSongTitle_${currentUser}`, songName);
+  localStorage.setItem(`openMapForSong_${currentUser}`, songName);
+  localStorage.setItem(`liveSection_${currentUser}`, 'true');
+  window.location.href = 'Main Page.html';
+}
+
+function renderSearchResults() {
+  const searchInput = document.getElementById('songSearchInput');
+  const searchResults = document.getElementById('searchResults');
+  if (!searchInput || !searchResults) return;
+
+  const query = searchInput.value.trim().toLowerCase();
+  if (query.length === 0) {
+    searchResults.style.display = 'none';
+    searchResults.innerHTML = '';
+    return;
+  }
+
+  const items = [];
+  (appData || []).forEach((artistObj) => {
+    const artistLabel = (artistObj.artist || '').toString();
+    const artistLower = artistLabel.toLowerCase();
+
+    if (artistLower.includes(query)) {
+      (artistObj.songs || []).forEach(song => {
+        items.push({ artist: artistLabel, song: song.name || '' });
+      });
+    } else {
+      (artistObj.songs || []).forEach(song => {
+        const songName = (song.name || '').toString();
+        if (songName.toLowerCase().includes(query)) {
+          items.push({ artist: artistLabel, song: songName });
+        }
+      });
+    }
+  });
+
+  if (items.length === 0) {
+    searchResults.innerHTML = '<div class="empty">No songs found.</div>';
+    searchResults.style.display = 'block';
+    return;
+  }
+
+  // keep first 25 results
+  const limited = items.slice(0, 25);
+  searchResults.innerHTML = limited.map(item =>
+    `<div class="search-result-item" data-artist="${item.artist.replace(/"/g, '&quot;')}" data-song="${item.song.replace(/"/g, '&quot;')}">` +
+    `<strong>${item.song}</strong> <span style="opacity:.7;">by ${item.artist}</span></div>`
+  ).join('');
+
+  searchResults.style.display = 'block';
+
+  Array.from(searchResults.children).forEach(el => {
+    el.onclick = () => {
+      const artistName = el.getAttribute('data-artist');
+      const songName = el.getAttribute('data-song');
+      goToMainSong(artistName, songName);
+    };
+  });
+}
+
+function initSearchBar() {
+  const searchInput = document.getElementById('songSearchInput');
+  const searchResults = document.getElementById('searchResults');
+  if (!searchInput || !searchResults) return;
+
+  searchInput.addEventListener('input', renderSearchResults);
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      searchInput.value = '';
+      searchResults.style.display = 'none';
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.search-container')) {
+      searchResults.style.display = 'none';
+    }
+  });
+}
+
 // Get current user and load initial data
 firebase.auth().onAuthStateChanged(async (user) => {
   if (!user) {
@@ -82,6 +166,7 @@ firebase.auth().onAuthStateChanged(async (user) => {
     }
 
     renderUI(); // Render UI after all data (appData and dark mode) is loaded
+    initSearchBar();
     document.body.classList.remove('loading'); // Remove loading class to show content
   }
   catch (error) {
@@ -419,8 +504,6 @@ function renderUI() {
           appData[artistIdx].songs.splice(songIdx, 1);
 
           delete liveSongsData[songNameToDelete];
-          // Also remove any live copy for that song
-          deleteLiveCopy(songNameToDelete);
 
           // Remove from liveSongs
           liveSongs = liveSongs.filter(name => name !== songNameToDelete);
@@ -567,6 +650,7 @@ document.addEventListener('click', function (e) {
 
 // --- Initial Render ---
 renderUI();
+initSearchBar();
 
 
 // --- Dark Mode ---
@@ -657,8 +741,6 @@ document.getElementById('changePasswordBtn').addEventListener('click', async fun
 
 
 // --- 2. GLOBAL HOVER & NAVIGATION LOGIC ---
-let holdTimer;
-
 const liveBtnContainer = document.querySelector('.live-btn-container');
 liveBtnContainer.ontouchstart = (e) => {
   e.stopPropagation();
@@ -680,14 +762,53 @@ function showLiveHover() {
 
   dropdown.innerHTML = '';
 
+  function getDragAfterElement(container, y) {
+    const draggableElements = [...container.querySelectorAll('.live-hover-item:not(.dragging)')];
+    return draggableElements.reduce((closest, child) => {
+      const box = child.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      if (offset < 0 && offset > closest.offset) {
+        return { offset: offset, element: child };
+      } else {
+        return closest;
+      }
+    }, { offset: -Infinity }).element;
+  }
+
+  async function saveLiveOrder() {
+    const items = [...dropdown.querySelectorAll('.live-hover-item')];
+    liveSongs = items
+      .map(it => it.querySelector('.live-song-title')?.textContent.trim() || '')
+      .filter(name => name !== '');
+
+    await saveData();
+    renderUI();
+    showLiveHover();
+  }
+
   if (liveSongs.length === 0) {
     dropdown.innerHTML = '<div class="live-hover-item">No live songs</div>';
   }
   else {
+    let touchStartY = null;
+
     liveSongs.forEach((songTitle, index) => {
       const item = document.createElement('div');
       item.className = 'live-hover-item';
-      item.innerText = songTitle;
+
+      const handle = document.createElement('span');
+      handle.className = 'live-drag-handle';
+      handle.textContent = '☰';
+      // For desktop, drag the entire item instead of handle for better target behavior
+      item.setAttribute('draggable', true);
+      handle.setAttribute('draggable', false);
+
+      const titleSpan = document.createElement('span');
+      titleSpan.className = 'live-song-title';
+      titleSpan.textContent = songTitle;
+
+      item.appendChild(handle);
+      item.appendChild(titleSpan);
 
       // Navigation Logic
       const navigateToSong = async () => {
@@ -696,42 +817,159 @@ function showLiveHover() {
         localStorage.setItem(`liveSection_${currentUser}`, 'false');
 
         await saveData();
-        window.location.href = "Main Page.html";
+        window.location.href = 'Main Page.html';
       };
 
-      // DESKTOP: Use 'pointerdown' to bypass touch conflicts
-      item.onpointerdown = (e) => {
+      // DESKTOP: Move by drag-and-drop using item (song row)
+      item.setAttribute('draggable', 'true');
+      handle.setAttribute('draggable', 'false');
+
+      item.addEventListener('dragstart', (e) => {
+        e.stopPropagation();
+        e.dataTransfer.effectAllowed = 'move';
+        // Required in some browsers for drag-and-drop to work reliably
+        e.dataTransfer.setData('text/plain', songTitle);
+        window.draggedLiveItem = item;
+        item.classList.add('dragging');
+      });
+
+      item.addEventListener('dragend', () => {
+        if (window.draggedLiveItem) {
+          window.draggedLiveItem.classList.remove('dragging');
+          window.draggedLiveItem = null;
+        }
+        document.querySelectorAll('.live-hover-item').forEach(it => it.classList.remove('drag-over'));
+      });
+
+      item.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const dragging = window.draggedLiveItem;
+        if (!dragging || dragging === item) return;
+
+        const afterElement = getDragAfterElement(dropdown, e.clientY);
+        if (afterElement == null) {
+          dropdown.appendChild(dragging);
+        } else {
+          dropdown.insertBefore(dragging, afterElement);
+        }
+
+        await saveLiveOrder();
+      });
+
+      item.addEventListener('dragover', (e) => {
+        e.preventDefault();
+      });
+
+      // DESKTOP: Right click delete on the row
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        deleteLiveSong(index);
+      });
+
+      // MOBILE: reordering via handle touch drag
+      handle.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (e.touches && e.touches.length === 1) {
+          touchStartY = e.touches[0].clientY;
+          window.draggedLiveItem = item;
+          item.classList.add('dragging');
+        }
+      }, { passive: false });
+
+      handle.addEventListener('touchmove', (e) => {
+        const dragging = window.draggedLiveItem;
+        if (!dragging || !e.touches || e.touches.length !== 1) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        const touchY = e.touches[0].clientY;
+        const afterElement = getDragAfterElement(dropdown, touchY);
+        if (afterElement == null) {
+          dropdown.appendChild(dragging);
+        } else {
+          dropdown.insertBefore(dragging, afterElement);
+        }
+      }, { passive: false });
+
+      handle.addEventListener('touchend', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (window.draggedLiveItem) {
+          window.draggedLiveItem.classList.remove('dragging');
+          window.draggedLiveItem = null;
+        }
+
+        await saveLiveOrder();
+      }, { passive: false });
+
+      handle.addEventListener('touchcancel', () => {
+        if (window.draggedLiveItem) {
+          window.draggedLiveItem.classList.remove('dragging');
+          window.draggedLiveItem = null;
+        }
+      });
+
+      // MOBILE: title action and long-press delete
+      let liveHoldTimer = null;
+      titleSpan.addEventListener('touchstart', () => {
+        liveHoldTimer = setTimeout(async () => {
+          liveHoldTimer = null;
+          await deleteLiveSong(index);
+        }, 2000);
+      }, { passive: true });
+
+      titleSpan.addEventListener('touchend', async (e) => {
+        if (liveHoldTimer) {
+          clearTimeout(liveHoldTimer);
+          liveHoldTimer = null;
+          e.preventDefault();
+          await navigateToSong();
+        }
+      });
+
+      titleSpan.addEventListener('touchcancel', () => {
+        if (liveHoldTimer) {
+          clearTimeout(liveHoldTimer);
+          liveHoldTimer = null;
+        }
+      });
+
+      // DESKTOP: pointer click navigation on title
+      titleSpan.onpointerdown = (e) => {
         if (e.pointerType === 'mouse' && e.button === 0) {
           navigateToSong();
         }
       };
 
-      // DESKTOP: Right Click Delete
-      item.oncontextmenu = (e) => {
-        e.preventDefault();
-        deleteLiveSong(index);
-      };
-
-      // MOBILE: Touch Logic
-      item.ontouchstart = () => {
-        holdTimer = setTimeout(() => {
-          holdTimer = null;
-          deleteLiveSong(index);
-        }, 2000);
-      };
-
-      item.ontouchend = (e) => {
-        if (holdTimer) {
-          clearTimeout(holdTimer);
-          holdTimer = null;
-          e.preventDefault();
-          navigateToSong();
-        }
-      };
-
-      item.ontouchcancel = () => clearTimeout(holdTimer);
-
       dropdown.appendChild(item);
+    });
+
+    dropdown.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const dragging = window.draggedLiveItem;
+      if (!dragging) return;
+
+      const afterElement = getDragAfterElement(dropdown, e.clientY);
+      if (afterElement == null) {
+        dropdown.appendChild(dragging);
+      } else {
+        dropdown.insertBefore(dragging, afterElement);
+      }
+    });
+
+    dropdown.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (window.draggedLiveItem) {
+        window.draggedLiveItem.classList.remove('dragging');
+        window.draggedLiveItem = null;
+      }
+      await saveLiveOrder();
     });
   }
   dropdown.style.display = 'block';
