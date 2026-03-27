@@ -392,19 +392,27 @@ a {
 
   #liveBtn {
     width: 80px;
-    left: 10px;
+    left: 13px;
   }
 
   .live-hover-dropdown {
-    min-width: 100px;
+    min-width: 90px;
     max-height: 150px;
     padding: 8px;
-    left: 50px;
+    padding-left: 1px;
+    left: 15%;
+    transform: none;
+    transform-origin: top left;
   }
 
   .live-hover-item {
     padding: 6px;
-    font-size: 9px;
+    font-size: 10px;
+  }
+
+  .live-drag-handle {
+    font-size: 13px;
+    padding: 0;
   }
 
   #darkBtn {
