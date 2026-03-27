@@ -434,7 +434,10 @@ function renderUI() {
       const renameSongBtn = document.createElement('button');
       renameSongBtn.className = 'renameBtn';
       renameSongBtn.textContent = '✏️';
-      renameSongBtn.onclick = () => {
+      
+      const handleRename = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         // Temporarily store href and disable the link
         const originalHref = songLink.getAttribute('href');
         songLink.removeAttribute('href');
@@ -492,11 +495,16 @@ function renderUI() {
         });
       };
 
+      renameSongBtn.onclick = handleRename;
+      renameSongBtn.ontouchend = handleRename;
+
       // Delete song button
       const deleteSongBtn = document.createElement('button');
       deleteSongBtn.className = 'deleteBtn';
       deleteSongBtn.textContent = '🗑️';
-      deleteSongBtn.onclick = async () => {
+      const handleDelete = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         if (confirm(`Delete this song?\n Song Name: ${song.name}  \n (This action cannot be undone)`)) {
           const songNameToDelete = song.name;
 
@@ -515,6 +523,9 @@ function renderUI() {
         }
       };
 
+      deleteSongBtn.onclick = handleDelete;
+      deleteSongBtn.ontouchend = handleDelete;
+
       // Add to live button
       const addToLiveBtn = document.createElement('button');
       addToLiveBtn.className = 'addToLiveBtn';
@@ -526,7 +537,9 @@ function renderUI() {
       else {
         addToLiveBtn.textContent = '🔴'; // Use red circle for "inactive"
       }
-      addToLiveBtn.onclick = async () => {
+      const handleAddToLive = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const songName = song.name;
 
         if (!liveSongs.includes(songName)) {
@@ -548,6 +561,9 @@ function renderUI() {
         await saveData();
         renderUI();
       }
+      
+      addToLiveBtn.onclick = handleAddToLive;
+      addToLiveBtn.ontouchend = handleAddToLive;
 
       editBtn.appendChild(renameSongBtn);
       editBtn.appendChild(deleteSongBtn);
