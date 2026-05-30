@@ -34,7 +34,7 @@ document.getElementById('signUpForm').addEventListener('submit', function (e) {
       return firebase.auth().createUserWithEmailAndPassword(email, password);
     })
     .then(() => {
-      window.location.href = "Home-index.html";
+      window.location.href = "Home-index-REFACTORED.html";
     })
     .catch((error) => {
       alert(error.message);

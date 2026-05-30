@@ -1,6 +1,7 @@
 body {
     margin: 0;
     padding: 0;
+    padding-bottom: 200px;
     height: 100%;
     overflow-x: hidden;
     width: 100%;
@@ -429,11 +430,11 @@ ul {
 
 /* Positioning */
 #undoBtn {
-    left: 10%;
+    left: 18%;
 }
 
 #redoBtn {
-    right: 10%;
+    right: 18%;
 }
 
 /* Hover / active states */

@@ -23,6 +23,8 @@ let currentSongData = null;
 let liveSongs = [];
 let liveSongsData = {};
 
+const homeUrl = 'Home-index.html';
+
 let beatsPerBar = 4;
 let chordsPerRow = 6;
 
@@ -86,15 +88,11 @@ async function applySnapshot(snapshot) {
   // render main UI and restore live view if the user had it open
   renderUI();
   if (wasLiveView) {
-    // show live songs & ensure left container is up to date
+    // show live songs in the right pane without destroying the artist sidebar
     try {
       showAllLiveSongsAndSections();
     } catch (e) {
-      // in case showAllLiveSongsAndSections isn't available yet, still call renderLeftContainer
       console.warn('showAllLiveSongsAndSections failed during undo/redo restore:', e);
-    }
-    if (typeof renderLeftContainer === 'function') {
-      renderLeftContainer();
     }
   }
 
@@ -242,6 +240,19 @@ function convertToNashville(chord, key) {
 
 function transposeChordLine(line, fromKey, toKey) {
   const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
+  // Defensive: ensure `line` is a string. Some stored chord rows may be
+  // arrays or other types (e.g. from malformed data). Coerce to a safe
+  // string so `.split` won't throw.
+  if (line === null || line === undefined) return '';
+  if (Array.isArray(line)) {
+    line = line.join(' ');
+  } else if (typeof line !== 'string') {
+    try {
+      line = String(line);
+    } catch (e) {
+      line = '';
+    }
+  }
 
   return line
     .split(/(\s+|·+)/) // split by space OR dot, keep separators
@@ -1043,129 +1054,6 @@ function showAllLiveSongsAndSections() {
     liveRightContainer.innerHTML = '<div align="center">No Live Songs Selected.</div>';
   }
 }
-function renderLeftContainer() {
-  // Left Container
-  const leftContainer = document.querySelector('.leftContainer');
-  leftContainer.innerHTML = ''; // Clear previous content
-
-  const liveTitle = document.createElement('div');
-  liveTitle.className = 'liveTitle';
-  liveTitle.textContent = 'Live Song ▼';
-  leftContainer.appendChild(liveTitle);
-
-  const liveContainer = document.createElement('div');
-  liveContainer.className = 'liveContainer';
-  leftContainer.appendChild(liveContainer);
-
-  // Always show the liveContainer when rendering UI
-  liveContainer.style.display = 'block';
-
-  // Use the static dropdown-menu if it exists, otherwise create it
-  let dropdownMenu = document.querySelector('.dropdown-menu');
-  if (!dropdownMenu) {
-    dropdownMenu = document.createElement('ul');
-    dropdownMenu.className = 'dropdown-menu';
-    liveContainer.appendChild(dropdownMenu);
-  }
-  dropdownMenu.innerHTML = ''; // Clear previous content
-
-  liveSongs.forEach(songName => {
-    const li = document.createElement('li');
-    li.className = 'songName';
-    li.textContent = songName;
-    dropdownMenu.appendChild(li);
-
-    // Add click event to each song name
-    li.addEventListener('click', function () {
-      localStorage.setItem(`currentSongTitle_${currentUser}`, songName);
-      if (title) title.textContent = songName; // Update the title
-      liveContainer.style.display = 'none'; // Hide the dropdown after selection
-      const rightContainer = document.querySelector('.rightContainer');
-      if (rightContainer) rightContainer.innerHTML = `<div class="chordsContainer"></div>`;
-
-      saveData(); // Save the current song title
-      renderUI(); // Re-render UI to reflect changes
-    });
-
-    // Remove live songs from localStorage on right-click
-    li.addEventListener('contextmenu', async function (e) {
-      e.preventDefault();
-      // record state before mutating so undo can restore
-      recordState();
-      // Remove the right-clicked song from the liveSongs array
-      liveSongs = liveSongs.filter(name => name !== songName);
-
-      // Remove this song from liveSongsData
-      delete liveSongsData[songName];
-      // Remove the song from the dropdown menu
-      li.remove();
-      await saveData(); // Save the updated liveSongs and liveSongsData
-    });
-
-    li.addEventListener('touchstart', function (e) {
-      // Start the timer
-      e.preventDefault();
-      holdTimeout = setTimeout(async () => {
-        // record state before mutating so undo can restore
-        recordState();
-        // Remove the right-clicked song from the liveSongs array
-        liveSongs = liveSongs.filter(name => name !== songName);
-
-        // Remove this song from liveSongsData
-        delete liveSongsData[songName];
-        // Remove the song from the dropdown menu
-        li.remove();
-        await saveData(); // Save the updated liveSongs and liveSongsData
-      }, holdTapThreshold);
-    });
-
-    li.addEventListener('touchend', function () {
-      // Cancel if released early
-      clearTimeout(holdTimeout);
-    });
-
-    li.addEventListener('touchmove', function () {
-      // Cancel if they move finger
-      clearTimeout(holdTimeout);
-    });
-  });
-
-  let title = document.querySelector('.title');
-
-
-  // Double-click to display all live songs and set the title
-  liveTitle.addEventListener('dblclick', function () {
-    localStorage.setItem(`openMapForSong_${currentUser}`, null);
-    showAllLiveSongsAndSections();
-  });
-
-  let holdTimeout = null;
-  // Hold-Tap to display all live songs and set the title
-  liveTitle.addEventListener('touchstart', function () {
-    // Start the timer
-    holdTimeout = setTimeout(() => {
-      // If the user holds long enough, do this:
-      localStorage.setItem(`openMapForSong_${currentUser}`, null);
-      document.querySelector('.title').style.display = 'none';
-      showAllLiveSongsAndSections();
-    }, holdTapThreshold);
-  });
-
-  liveTitle.addEventListener('touchend', function () {
-    // Cancel if released early
-    clearTimeout(holdTimeout);
-  });
-
-  liveTitle.addEventListener('touchmove', function () {
-    // Cancel if they move finger
-    clearTimeout(holdTimeout);
-  });
-
-  // Add event listener to liveTitle to toggle dropdown
-  liveTitle.addEventListener('click', function () {
-    dropdownMenu.classList.toggle('show');
-  });
-}
 
 // --- Data Model and Persistence ---
 firebase.auth().onAuthStateChanged(async (user) => {
@@ -1208,18 +1096,31 @@ firebase.auth().onAuthStateChanged(async (user) => {
     const liveSection = localStorage.getItem(`liveSection_${currentUser}`);
 
     if (liveSection === 'true') {
-      localStorage.setItem(`openMapForSong_${currentUser}`, null);
+      // Ensure we render the full UI (artists/sidebar) first,
+      // then replace the right pane with the live view so the
+      // left sidebar is populated even when entering via live mode.
+      try {
+        localStorage.setItem(`openMapForSong_${currentUser}`, null);
 
-      // clear one-time liveSection flag and persist view state
-      localStorage.setItem(`liveSection_${currentUser}`, 'false');
+        // clear one-time liveSection flag and persist view state
+        localStorage.setItem(`liveSection_${currentUser}`, 'false');
 
-      // render live UI and left column, then exit early
-      showAllLiveSongsAndSections();
-      if (typeof renderLeftContainer === 'function') renderLeftContainer();
+        // Render the normal UI (populates left sidebar)
+        renderUI();
 
-      // clear any requested openMap flag so it doesn't re-open unexpectedly
-      localStorage.setItem(`openMapForSong_${currentUser}`, null);
-      return; // do not call renderUI()
+        // Now show the live UI in the right pane
+        showAllLiveSongsAndSections();
+
+        // clear any requested openMap flag so it doesn't re-open unexpectedly
+        localStorage.setItem(`openMapForSong_${currentUser}`, null);
+      } catch (err) {
+        console.warn('Error initializing live view, falling back to default UI:', err);
+        renderUI();
+      }
+
+      // keep loading state cleared
+      document.body.classList.remove('loading');
+      return;
     }
 
     // Default: render original UI
@@ -2343,7 +2244,7 @@ async function darkMode() {
 
 // --- Go To Home Page ---
 function home() {
-  window.location.href = 'Home-index.html';
+  window.location.href = homeUrl;
 }
 
 

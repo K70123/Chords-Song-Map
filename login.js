@@ -20,7 +20,7 @@ firebase.auth().onAuthStateChanged((user) => {
   }
 });
 
-document.getElementById('loginForm').addEventListener('submit', function(e) {
+document.getElementById('loginForm').addEventListener('submit', function (e) {
   e.preventDefault();
   const email = document.querySelector('input[name="email"]').value;
   const password = document.querySelector('input[name="psw"]').value;
@@ -46,7 +46,7 @@ document.getElementById('loginForm').addEventListener('submit', function(e) {
 
 document.querySelector('.psw').addEventListener('click', function (e) {
   e.preventDefault();
-  
+
   const email = prompt("Please enter your email to reset your password:");
   if (!email) return;
 
@@ -58,3 +58,4 @@ document.querySelector('.psw').addEventListener('click', function (e) {
       alert("Error: " + error.message);
     });
 });
+

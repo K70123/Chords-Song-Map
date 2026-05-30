@@ -1,46 +1,66 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8" name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Chords & Song Map</title>
-  <link rel="stylesheet" href="Home-style.css">
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Chords & Song Maps</title>
+    <link rel="stylesheet" href="Home-style.css">
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
-<body>
-  <div id="title">🎵Chords & Song Maps🎵</div>
 
-  <div class="search-container">
-    <input id="songSearchInput" type="text" placeholder="Search song or artist..." autocomplete="off" />
-    <div id="searchResults" class="search-results" aria-live="polite"></div>
-  </div>
-  
-  <div class="container">
+<body class="loading">
+    <!-- Main Title -->
+    <div id="title">🎵Chords & Song Maps🎵</div>
 
-  </div>
-  <div class="noArtist">No Artist Added <br> (click the + button)</div>
+    <!-- Search Bar - Touch & Stylus Optimized -->
+    <div class="search-container">
+        <input id="songSearchInput" type="text" placeholder="Search song or artist..." autocomplete="off" />
+        <div id="searchResults" class="search-results" aria-live="polite"></div>
+    </div>
 
-  <div class="live-btn-container" onmouseover="showLiveHover()" onmouseout="hideLiveHover()" >
-  <button id="liveBtn" class="bottomBtn" onclick="liveSection()">Live
-  </button>
-    <div id="liveDropdown" class="live-hover-dropdown"></div>
-  </div> 
+    <!-- Artists & Songs Container - Responsive Grid -->
+    <div class="container"></div>
 
-  <button id="darkBtn" class="bottomBtn" onclick="darkMode()">
-    <span id="darkBtnIcon">☾⋆</span>
-    <span id="darkBtnSpan">Dark Mode</span>
-  </button>
-  <button id="changePasswordBtn" class="bottomBtn">🔒
-    <span>Change Password</span>
-  </button>
-  <button id="logOut" class="bottomBtn" onclick="logOut()">➜
-    <span>Log Out</span>
-  </button>
-  <button id="addArtistBtn" class="bottomBtn">+
-    <span>Add Artist</span>
-  </button>
+    <!-- Empty State Message -->
+    <div class="noArtist">No Artist Added <br /> (click the + button)</div>
 
-  <script src="Home-script.js"></script>
+    <!-- Live Section Button Container -->
+    <div class="live-btn-container" onmouseover="showLiveHover()" onmouseout="hideLiveHover()">
+        <button id="liveBtn" class="bottomBtn" onclick="liveSection()" title="View Live Section"
+            aria-label="View Live Section">
+            Live
+        </button>
+        <div id="liveDropdown" class="live-hover-dropdown"></div>
+    </div>
+
+    <!-- Dark Mode Toggle Button -->
+    <button id="darkBtn" class="bottomBtn" onclick="darkMode()" title="Toggle Dark Mode" aria-label="Toggle Dark Mode">
+        ☾⋆
+        <span id="darkBtnSpan">Dark Mode</span>
+    </button>
+
+    <!-- Change Password Button -->
+    <button id="changePasswordBtn" class="bottomBtn" title="Change Password" aria-label="Change Password">
+        🔒
+        <span>Change Password</span>
+    </button>
+
+    <!-- Log Out Button -->
+    <button id="logOut" class="bottomBtn" onclick="logOut()" title="Log Out" aria-label="Log Out">
+        ➜
+        <span>Log Out</span>
+    </button>
+
+    <!-- Add Artist Button -->
+    <button id="addArtistBtn" class="bottomBtn" title="Add New Artist" aria-label="Add New Artist">
+        +
+        <span>Add Artist</span>
+    </button>
+
+    <script src="Home-script.js"></script>
 </body>
+
 </html>

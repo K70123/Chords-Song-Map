@@ -1,1008 +1,1052 @@
 const firebaseConfig = {
-  apiKey: "AIzaSyDq2yjYSfyhiIbrviV0WhW-NKzdfk7ABrQ",
-  authDomain: "chords-and-song-maps.firebaseapp.com",
-  projectId: "chords-and-song-maps",
-  storageBucket: "chords-and-song-maps.appspot.com",
-  messagingSenderId: "364224410651",
-  appId: "1:364224410651:web:d26213bf0e0b536aae34be",
-  measurementId: "G-CQEJKPQX1C"
+    apiKey: "AIzaSyDq2yjYSfyhiIbrviV0WhW-NKzdfk7ABrQ",
+    authDomain: "chords-and-song-maps.firebaseapp.com",
+    projectId: "chords-and-song-maps",
+    storageBucket: "chords-and-song-maps.appspot.com",
+    messagingSenderId: "364224410651",
+    appId: "1:364224410651:web:d26213bf0e0b536aae34be",
+    measurementId: "G-CQEJKPQX1C"
 };
 
 // Prevent double init
 if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
+    firebase.initializeApp(firebaseConfig);
 }
 
-let appData = []; // Initialize globally, will be populated by Firestore
-let currentUser = null; // Will store the user UID
-
+let appData = [];
+let currentUser = null;
 let liveSongs = [];
-let liveSongsData = {}; // Object to store live songs data
+let liveSongsData = {};
+let globalClickHandlersInitialized = false;
+
+const mainPageUrl = 'Main Page.html';
+
+function safeArray(value) {
+    return Array.isArray(value) ? value : [];
+}
+
+function safeObject(value) {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function initializeGlobalClickHandler() {
+    if (globalClickHandlersInitialized) return;
+    globalClickHandlersInitialized = true;
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.artist-actions-btn') &&
+            !e.target.closest('.artist-actions-menu')) {
+            document.querySelectorAll('.artist-actions-menu').forEach(menu => menu.style.display = 'none');
+        }
+
+        if (!e.target.closest('.song-actions-btn') &&
+            !e.target.closest('.song-actions-menu')) {
+            document.querySelectorAll('.song-actions-menu').forEach(menu => menu.style.display = 'none');
+        }
+
+        if (!e.target.closest('.artist') && !e.target.closest('.dropdown-menu')) {
+            document.querySelectorAll('.dropdown-menu').forEach(menu => menu.style.display = 'none');
+        }
+
+        if (!e.target.closest('.live-btn-container') && !e.target.closest('#liveDropdown')) {
+            hideLiveHover();
+        }
+    });
+}
+
+/**
+ * ============================================
+ * DEFENSIVE DATA INITIALIZATION & VALIDATION
+ * ============================================
+ */
+
+/**
+ * Ensures a song object has all required fields with safe defaults
+ * Prevents crashes from missing chords, originalKey, or songMap
+ */
+function ensureSongDataIntegrity(song) {
+    if (!song) return null;
+
+    try {
+        // Ensure basic fields exist
+        if (!song.name) song.name = "Untitled";
+        if (!song.url) song.url = mainPageUrl;
+
+        // CRITICAL: Initialize missing chord data with safe defaults
+        if (!Array.isArray(song.chords) || song.chords.length === 0) {
+            song.chords = [
+                {
+                    section: "Intro",
+                    chords: [
+                        { beats: 4, chordLine: "• • • •" }
+                    ]
+                }
+            ];
+        }
+
+        // CRITICAL: Ensure originalKey is set (required for transposition)
+        if (!song.originalKey) {
+            song.originalKey = "C"; // Safe default
+        }
+
+        // CRITICAL: Initialize songMap if missing
+        if (!Array.isArray(song.songMap)) {
+            song.songMap = [];
+        }
+
+        // Safe defaults for playback parameters
+        if (!song.beatsPerBar || song.beatsPerBar < 1) {
+            song.beatsPerBar = 4;
+        }
+
+        if (!song.chordsPerRow || song.chordsPerRow < 1 || song.chordsPerRow > 10) {
+            song.chordsPerRow = 4;
+        }
+
+        return song;
+    } catch (err) {
+        console.error("Error ensuring song data integrity:", err);
+        return song;
+    }
+}
+
+/**
+ * Validates song is safe to add to live section
+ * Returns {valid: boolean, errors: string[]}
+ */
+function validateSongForLive(song) {
+    const errors = [];
+
+    if (!song || !song.name) errors.push("Song has no name");
+    if (!song.originalKey) errors.push("Song missing original key");
+    if (!Array.isArray(song.chords) || song.chords.length === 0) {
+        errors.push("Song missing chords section");
+    }
+    // songMap is optional, so we don't require it
+
+    return {
+        valid: errors.length === 0,
+        errors: errors
+    };
+}
+
+/**
+ * Safely adds song to live section with validation and auto-repair
+ */
+async function safeAddToLiveSection(song) {
+    try {
+        // Ensure data integrity first
+        const repaired = ensureSongDataIntegrity(song);
+        if (!repaired) {
+            console.error("Cannot add song to live section: data repair failed");
+            return false;
+        }
+
+        // Check validation
+        const validation = validateSongForLive(repaired);
+        if (!validation.valid) {
+            // Auto-repair missing data
+            const repairedWithDefaults = ensureSongDataIntegrity(repaired);
+            // Update the original song object
+            Object.assign(song, repairedWithDefaults);
+        }
+
+        // Add to live songs if not already there
+        if (!liveSongs.includes(song.name)) {
+            liveSongs.push(song.name);
+            // Create a deep copy for live editing
+            liveSongsData[song.name] = JSON.parse(JSON.stringify(song));
+        }
+
+        return true;
+    } catch (err) {
+        console.error("Error adding song to live section:", err);
+        return false;
+    }
+}
+
+/**
+ * ============================================
+ * UTILITY FUNCTIONS
+ * ============================================
+ */
 
 function goToMainSong(artistName, songName) {
-  if (!currentUser) return;
-  // preselect song and keep portal to live section
-  localStorage.setItem(`currentSongTitle_${currentUser}`, songName);
-  localStorage.setItem(`openMapForSong_${currentUser}`, songName);
-  localStorage.setItem(`liveSection_${currentUser}`, 'true');
-  window.location.href = 'Main Page.html';
+    if (!currentUser) {
+        console.error("No user logged in");
+        return;
+    }
+
+    // Preselect song and keep portal to live section
+    localStorage.setItem(`currentSongTitle_${currentUser}`, songName);
+    localStorage.setItem(`openMapForSong_${currentUser}`, songName);
+    localStorage.setItem(`liveSection_${currentUser}`, 'true');
+    window.location.href = mainPageUrl;
 }
 
+/**
+ * ============================================
+ * SEARCH BAR FUNCTIONALITY
+ * ============================================
+ */
+
 function renderSearchResults() {
-  const searchInput = document.getElementById('songSearchInput');
-  const searchResults = document.getElementById('searchResults');
-  if (!searchInput || !searchResults) return;
+    const searchInput = document.getElementById('songSearchInput');
+    const searchResults = document.getElementById('searchResults');
+    if (!searchInput || !searchResults) return;
 
-  const query = searchInput.value.trim().toLowerCase();
-  if (query.length === 0) {
-    searchResults.style.display = 'none';
-    searchResults.innerHTML = '';
-    return;
-  }
-
-  const items = [];
-  (appData || []).forEach((artistObj) => {
-    const artistLabel = (artistObj.artist || '').toString();
-    const artistLower = artistLabel.toLowerCase();
-
-    if (artistLower.includes(query)) {
-      (artistObj.songs || []).forEach(song => {
-        items.push({ artist: artistLabel, song: song.name || '' });
-      });
-    } else {
-      (artistObj.songs || []).forEach(song => {
-        const songName = (song.name || '').toString();
-        if (songName.toLowerCase().includes(query)) {
-          items.push({ artist: artistLabel, song: songName });
-        }
-      });
+    const query = searchInput.value.trim().toLowerCase();
+    if (query.length === 0) {
+        searchResults.style.display = 'none';
+        searchResults.innerHTML = '';
+        return;
     }
-  });
 
-  if (items.length === 0) {
-    searchResults.innerHTML = '<div class="empty">No songs found.</div>';
+    const items = [];
+    (appData || []).forEach((artistObj) => {
+        const artistLabel = (artistObj.artist || '').toString();
+        const artistLower = artistLabel.toLowerCase();
+
+        if (artistLower.includes(query)) {
+            (artistObj.songs || []).forEach(song => {
+                items.push({ artist: artistLabel, song: song.name || '' });
+            });
+        } else {
+            (artistObj.songs || []).forEach(song => {
+                const songName = (song.name || '').toString();
+                if (songName.toLowerCase().includes(query)) {
+                    items.push({ artist: artistLabel, song: songName });
+                }
+            });
+        }
+    });
+
+    if (items.length === 0) {
+        searchResults.innerHTML = '<div class="empty">No songs found.</div>';
+        searchResults.style.display = 'block';
+        return;
+    }
+
+    // Keep first 25 results
+    const limited = items.slice(0, 25);
+    searchResults.innerHTML = limited.map(item =>
+        `<div class="search-result-item" data-artist="${item.artist.replace(/"/g, '&quot;')}" data-song="${item.song.replace(/"/g, '&quot;')}">` +
+        `<strong>${item.song}</strong> <span style="opacity:.7; margin-left: 7px;">by ${item.artist}</span></div>`
+    ).join('');
+
     searchResults.style.display = 'block';
-    return;
-  }
 
-  // keep first 25 results
-  const limited = items.slice(0, 25);
-  searchResults.innerHTML = limited.map(item =>
-    `<div class="search-result-item" data-artist="${item.artist.replace(/"/g, '&quot;')}" data-song="${item.song.replace(/"/g, '&quot;')}">` +
-    `<strong>${item.song}</strong> <span style="opacity:.7;">by ${item.artist}</span></div>`
-  ).join('');
-
-  searchResults.style.display = 'block';
-
-  Array.from(searchResults.children).forEach(el => {
-    el.onclick = () => {
-      const artistName = el.getAttribute('data-artist');
-      const songName = el.getAttribute('data-song');
-      goToMainSong(artistName, songName);
-    };
-  });
+    Array.from(searchResults.children).forEach(el => {
+        el.addEventListener('click', () => {
+            const artistName = el.getAttribute('data-artist');
+            const songName = el.getAttribute('data-song');
+            goToMainSong(artistName, songName);
+        });
+    });
 }
 
 function initSearchBar() {
-  const searchInput = document.getElementById('songSearchInput');
-  const searchResults = document.getElementById('searchResults');
-  if (!searchInput || !searchResults) return;
+    const searchInput = document.getElementById('songSearchInput');
+    const searchResults = document.getElementById('searchResults');
+    if (!searchInput || !searchResults) return;
 
-  searchInput.addEventListener('input', renderSearchResults);
-  searchInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      searchInput.value = '';
-      searchResults.style.display = 'none';
-    }
-  });
+    // === FORCE HARDWARE FOCUS FOR IPAD/STYLUS ===
+    // 'pointerdown' fires before click/touch can be suppressed by global listeners
+    searchInput.addEventListener('pointerdown', function (e) {
+        e.stopPropagation(); // Stops the parent container from dropping focus
+        this.focus();
+    });
 
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.search-container')) {
-      searchResults.style.display = 'none';
-    }
-  });
+    // Fallback for strict touch-devices 
+    searchInput.addEventListener('touchstart', function (e) {
+        e.stopPropagation();
+        this.focus();
+    });
+
+    searchInput.addEventListener('input', renderSearchResults);
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            searchInput.value = '';
+            searchResults.style.display = 'none';
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.search-container')) {
+            searchResults.style.display = 'none';
+        }
+    });
 }
 
-// Get current user and load initial data
+/**
+ * ============================================
+ * FIREBASE AUTHENTICATION & DATA LOADING
+ * ============================================
+ */
+
 firebase.auth().onAuthStateChanged(async (user) => {
-  if (!user) {
-    window.location.href = "index.html"; // Redirect to login if not authenticated
-    return;
-  }
-
-  currentUser = user.uid; // Set currentUser UID
-  console.log("Authenticated user:", currentUser);
-
-  try {
-    const doc = await firebase.firestore().collection('users').doc(currentUser).get();
-
-    // Dark mode loading
-    if (doc.exists) {
-      const userData = doc.data();
-      appData = userData.appData || []; // Load appData into your global variable
-      liveSongs = userData.liveSongs || []; // Load liveSongs into your global variable
-      liveSongsData = userData.liveSongsData || {};
-      const isDarkMode = userData.darkMode === true; // Load darkMode state
-
-      if (isDarkMode) {
-        document.body.classList.add('dark-mode');
-        // Update dark mode button icon/text immediately
-        const iconSpan = document.querySelector('#darkBtnIcon');
-        const textSpan = document.querySelector('#darkBtnSpan');
-        if (iconSpan && textSpan) {
-          iconSpan.textContent = '☼';
-          textSpan.textContent = 'Light Mode';
-          if (window.innerWidth < 600) {
-            iconSpan.style.height = '36px';
-            iconSpan.style.width = '95px';
-          }
-          else {
-            iconSpan.style.height = '62px';
-            iconSpan.style.width = '64.5px';
-          }
-        }
-      }
-      else {
-        document.body.classList.remove('dark-mode');
-        // Update dark mode button icon/text immediately
-        const iconSpan = document.querySelector('#darkBtnIcon');
-        const textSpan = document.querySelector('#darkBtnSpan');
-        if (iconSpan && textSpan) {
-          iconSpan.textContent = '☾⋆';
-          textSpan.textContent = 'Dark Mode';
-          if (window.innerWidth < 600) {
-            iconSpan.style.height = '42px';
-            iconSpan.style.width = '102px';
-          } else {
-            iconSpan.style.height = '70px';
-            iconSpan.style.width = '70px';
-          }
-        }
-      }
-    }
-    else {
-      appData = []; // Default to empty array if no user data found
-      document.body.classList.remove('dark-mode'); // Default to light mode if no data
+    if (!user) {
+        window.location.href = "index.html";
+        return;
     }
 
-    renderUI(); // Render UI after all data (appData and dark mode) is loaded
-    initSearchBar();
-    document.body.classList.remove('loading'); // Remove loading class to show content
-  }
-  catch (error) {
-    console.error("Error loading user data from Firestore:", error);
-    // Potentially redirect to an error page or show a user-friendly message
-  }
+    currentUser = user.uid;
+    console.log("Authenticated user:", currentUser);
+
+    try {
+        const doc = await firebase.firestore().collection('users').doc(currentUser).get();
+
+        if (doc.exists) {
+            const userData = doc.data();
+            appData = safeArray(userData.appData);
+            liveSongs = safeArray(userData.liveSongs);
+            liveSongsData = safeObject(userData.liveSongsData);
+
+            // Normalize appData and ensure song integrity
+            appData = appData.map((artist) => {
+                return {
+                    ...artist,
+                    songs: safeArray(artist.songs).map(song => ensureSongDataIntegrity(song))
+                };
+            });
+
+            // Validate and repair live songs data on load
+            if (Array.isArray(liveSongs)) {
+                liveSongs = liveSongs.filter(songName => {
+                    if (!liveSongsData[songName]) {
+                        // Try to find original song
+                        for (const artist of appData) {
+                            const orig = artist.songs.find(s => s.name === songName);
+                            if (orig) {
+                                liveSongsData[songName] = ensureSongDataIntegrity(
+                                    JSON.parse(JSON.stringify(orig))
+                                );
+                                return true;
+                            }
+                        }
+                        return false; // Remove if not found
+                    }
+                    // Ensure data integrity
+                    ensureSongDataIntegrity(liveSongsData[songName]);
+                    return true;
+                });
+            }
+
+            const isDarkMode = userData.darkMode === true;
+            if (isDarkMode) {
+                document.body.classList.add('dark-mode');
+                const darkbtn = document.getElementById('darkBtn');
+                const textSpan = document.querySelector('#darkBtnSpan');
+                if (darkbtn && textSpan) {
+                    darkbtn.innerHTML = '☼';
+                    textSpan.textContent = 'Light Mode';
+                }
+            } else {
+                document.body.classList.remove('dark-mode');
+                const darkbtn = document.getElementById('darkBtn');
+                const textSpan = document.querySelector('#darkBtnSpan');
+                if (darkbtn && textSpan) {
+                    darkbtn.innerHTML = '☾⋆';
+                    textSpan.textContent = 'Dark Mode';
+                }
+            }
+        } else {
+            appData = [];
+            document.body.classList.remove('dark-mode');
+        }
+
+        renderUI();
+        initSearchBar();
+        document.body.classList.remove('loading');
+    } catch (error) {
+        console.error("Error loading user data from Firestore:", error);
+    }
 });
 
-// Save data to Firestore
-async function saveData() {
-  if (!currentUser) { // Ensure currentUser is available
-    console.error("User not logged in, cannot save data.");
-    return;
-  }
-  // Add a defensive check here to ensure appData is an array before saving
-  if (!Array.isArray(appData)) {
-    console.error("appData is not an array, cannot save:", appData);
-    appData = []; // Reset to empty array to prevent future errors
-  }
-  if (!Array.isArray(liveSongs)) { // <--- NEW: Defensive check for liveSongs
-    console.error("liveSongs is not an array, cannot save:", liveSongs);
-    liveSongs = [];
-  }
+/**
+ * ============================================
+ * DATA PERSISTENCE
+ * ============================================
+ */
 
-  try {
-    await firebase.firestore().collection('users').doc(currentUser).set({
-      appData: appData, // THIS refers to the global `appData` variable
-      liveSongs: liveSongs,
-      liveSongsData: liveSongsData // Save liveSongsData object
-    }, { merge: true });
-  }
-  catch (error) {
-    console.error("Error saving app data to Firestore:", error);
-  }
+async function saveData() {
+    if (!currentUser) {
+        console.error("User not logged in, cannot save data.");
+        return;
+    }
+
+    // Defensive checks
+    if (!Array.isArray(appData)) {
+        console.error("appData is not an array, resetting...");
+        appData = [];
+    }
+    if (!Array.isArray(liveSongs)) {
+        console.error("liveSongs is not an array, resetting...");
+        liveSongs = [];
+    }
+    if (!liveSongsData || typeof liveSongsData !== 'object') {
+        console.error("liveSongsData is not an object, resetting...");
+        liveSongsData = {};
+    }
+
+    try {
+        await firebase.firestore().collection('users').doc(currentUser).set({
+            appData: appData,
+            liveSongs: liveSongs,
+            liveSongsData: liveSongsData
+        }, { merge: true });
+    } catch (error) {
+        console.error("Error saving app data to Firestore:", error);
+    }
 }
 
+/**
+ * ============================================
+ * UI RENDERING WITH TOUCH-FRIENDLY INTERACTIONS
+ * ============================================
+ */
 
-
-// --- Add New Artist Button ---
+// Add new artist button
 document.getElementById('addArtistBtn').addEventListener('click', function () {
-  // Check if a user is logged in before proceeding
-  if (!firebase.auth().currentUser) { // Use firebase.auth().currentUser for this check
-    console.error("No user logged in to add artist.");
-    return;
-  }
+    if (!firebase.auth().currentUser) {
+        console.error("No user logged in to add artist.");
+        return;
+    }
 
-  // Add the new artist to the global appData array
-  appData.push({ artist: 'Unknown Artist', songs: [] });
+    appData.push({ artist: 'Unknown Artist', songs: [] });
+    appData.sort((a, b) => a.artist.toLowerCase().localeCompare(b.artist.toLowerCase()));
 
-  // Sort artist alphabetically
-  appData.sort((a, b) => a.artist.toLowerCase().localeCompare(b.artist.toLowerCase()));
-
-  saveData(); // Save the updated appData to Firestore
-  renderUI(); // Re-render the UI to display the new artist
+    saveData();
+    renderUI();
 });
 
-
-// --- UI Rendering ---
 function renderUI() {
-  if (Array.isArray(appData) && appData.length > 0) {
-    document.querySelector('.noArtist').style.display = 'none';
-  }
-  else {
-    document.querySelector('.noArtist').style.display = 'block';
-  }
+    appData = safeArray(appData);
+    const container = document.querySelector('.container');
+    if (!container) return;
 
-  let lastTap = 0;
-  const tapThreshold = 300; // max ms between taps to count as double-tap
+    initializeGlobalClickHandler();
 
+    if (appData.length > 0) {
+        document.querySelector('.noArtist').style.display = 'none';
+    } else {
+        document.querySelector('.noArtist').style.display = 'block';
+    }
 
-  const container = document.querySelector('.container');
-  container.innerHTML = '';
-  appData.forEach((artistObj, artistIdx) => { /*artistObj is an object with artist name and songs array
-    artistObj = { artist: 'Artist Name', songs: [{ name: 'Song 1', url: 'link1' }, { name: 'Song 2', url: 'link2' }] }
-  */
-    // Artist container
-    const songContainer = document.createElement('div');
-    songContainer.className = 'songContainer';
+    container.innerHTML = '';
 
-    // Top bar
-    const topContainer = document.createElement('div');
-    topContainer.className = 'topContainer';
+    appData.forEach((artistObj, artistIdx) => {
+        // Artist container
+        const songContainer = document.createElement('div');
+        songContainer.className = 'songContainer';
 
-    // Artist name
-    const artistDiv = document.createElement('div');
-    artistDiv.className = 'artist';
-    artistDiv.textContent = artistObj.artist;
+        // Top bar with artist name and action menu
+        const topContainer = document.createElement('div');
+        topContainer.className = 'topContainer';
 
-    // Dropdown arrow in a separate span
-    const arrowSpan = document.createElement('span');
-    arrowSpan.className = 'artist-arrow';
-    arrowSpan.textContent = ' ▼';
-    artistDiv.appendChild(arrowSpan);
+        // Artist name
+        const artistDiv = document.createElement('div');
+        artistDiv.className = 'artist';
+        artistDiv.textContent = artistObj.artist;
 
-    topContainer.appendChild(artistDiv);
+        const artistActionsBtn = document.createElement('button');
+        artistActionsBtn.className = 'artist-actions-btn';
+        artistActionsBtn.setAttribute('aria-label', `Actions for artist ${artistObj.artist}`);
+        artistActionsBtn.innerHTML = '⋮'; // Three dots menu icon
+        artistActionsBtn.setAttribute('data-artist-idx', artistIdx);
 
-    // Right-click the artist name to show buttons
-    artistDiv.addEventListener('contextmenu', function (e) {
-      e.preventDefault();
-      // Hide all other containerBtn first
-      document.querySelectorAll('.containerBtn').forEach(btn => {
-        btn.style.display = 'none';
-      });
-      // Show this artist's buttons
-      containerBtn.style.display = 'block';
-    });
+        topContainer.appendChild(artistDiv);
+        topContainer.appendChild(artistActionsBtn);
 
-    // Double tap to show the artist name edit button
-    artistDiv.addEventListener('touchstart', function (e) {
-      const currentTime = new Date().getTime();
-      const tapLength = currentTime - lastTap;
+        // Artist action menu (initially hidden)
+        const artistActionsMenu = document.createElement('div');
+        artistActionsMenu.className = 'artist-actions-menu';
+        artistActionsMenu.style.display = 'none';
 
-      if (tapLength < tapThreshold && tapLength > 0) {
-        e.preventDefault();
-        document.querySelectorAll('.containerBtn').forEach(btn => {
-          btn.style.display = 'none';
+        const renameBtn = document.createElement('button');
+        renameBtn.className = 'artist-menu-btn';
+        renameBtn.textContent = '✏️ Rename Artist';
+        renameBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            handleArtistRename(artistIdx, artistDiv, artistActionsMenu);
         });
-        // Show this artist's buttons
-        containerBtn.style.display = 'block';
-      }
 
-      lastTap = currentTime;
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'artist-menu-btn artist-menu-btn-delete';
+        deleteBtn.textContent = '🗑️ Delete Artist';
+        deleteBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (confirm(`Delete "${artistObj.artist}" and all its songs?\n(This cannot be undone)`)) {
+                const artistSongs = appData[artistIdx].songs.map(s => s.name);
+                artistSongs.forEach(songName => {
+                    liveSongs = liveSongs.filter(n => n !== songName);
+                    delete liveSongsData[songName];
+                });
+                appData.splice(artistIdx, 1);
+                await saveData();
+                renderUI();
+            }
+            artistActionsMenu.style.display = 'none';
+        });
+
+        artistActionsMenu.appendChild(renameBtn);
+        artistActionsMenu.appendChild(deleteBtn);
+
+        // Toggle menu visibility
+        artistActionsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // Close all other menus
+            document.querySelectorAll('.artist-actions-menu').forEach(menu => {
+                if (menu !== artistActionsMenu) menu.style.display = 'none';
+            });
+            artistActionsMenu.style.display =
+                artistActionsMenu.style.display === 'none' ? 'block' : 'none';
+        });
+
+        topContainer.appendChild(artistActionsMenu);
+        songContainer.appendChild(topContainer);
+
+        // Dropdown menu for songs
+        const dropdownMenu = document.createElement('div');
+        dropdownMenu.className = 'dropdown-menu';
+
+        const songList = document.createElement('ul');
+        songList.className = 'songList';
+        const artistSongs = safeArray(artistObj.songs);
+
+        artistSongs.forEach((song, songIdx) => {
+            const songItem = document.createElement('li');
+            songItem.className = 'songItem';
+
+            const songNameContainer = document.createElement('div');
+            songNameContainer.className = 'songNameContainer';
+
+            const songName = document.createElement('span');
+            songName.className = 'songName';
+
+            const songLink = document.createElement('a');
+            songLink.className = 'songLink';
+            songLink.textContent = song.name;
+            songLink.href = '#';
+
+            songName.appendChild(songLink);
+            songNameContainer.appendChild(songName);
+
+            songLink.addEventListener('click', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                localStorage.setItem(`currentSongTitle_${currentUser}`, song.name);
+                localStorage.setItem(`liveSection_${currentUser}`, 'false');
+                localStorage.setItem(`openMapForSong_${currentUser}`, song.name);
+                await saveData();
+                window.location.href = mainPageUrl;
+            });
+
+            songNameContainer.addEventListener('click', async (e) => {
+                if (e.target.closest('.song-actions-btn') || e.target.closest('.song-actions-menu')) return;
+                e.preventDefault();
+                e.stopPropagation();
+                localStorage.setItem(`currentSongTitle_${currentUser}`, song.name);
+                localStorage.setItem(`liveSection_${currentUser}`, 'false');
+                localStorage.setItem(`openMapForSong_${currentUser}`, song.name);
+                await saveData();
+                window.location.href = mainPageUrl;
+            });
+
+            const songActionsBtn = document.createElement('button');
+            songActionsBtn.className = 'song-actions-btn';
+            songActionsBtn.setAttribute('aria-label', `Actions for song ${song.name}`);
+            songActionsBtn.innerHTML = '⋮';
+            songActionsBtn.setAttribute('data-song-idx', songIdx);
+
+            const songActionsMenu = document.createElement('div');
+            songActionsMenu.className = 'song-actions-menu';
+            songActionsMenu.style.display = 'none';
+
+            // Rename song
+            const renameSongBtn = document.createElement('button');
+            renameSongBtn.className = 'song-menu-btn';
+            renameSongBtn.textContent = '✏️ Rename';
+            renameSongBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleSongRename(artistIdx, songIdx, song, songLink);
+                songActionsMenu.style.display = 'none';
+            });
+
+            // Delete song
+            const deleteSongBtn = document.createElement('button');
+            deleteSongBtn.className = 'song-menu-btn song-menu-btn-delete';
+            deleteSongBtn.textContent = '🗑️ Delete';
+            deleteSongBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (confirm(`Delete "${song.name}"?\n(This cannot be undone)`)) {
+                    const songNameToDelete = song.name;
+                    appData[artistIdx].songs.splice(songIdx, 1);
+                    liveSongs = liveSongs.filter(n => n !== songNameToDelete);
+                    delete liveSongsData[songNameToDelete];
+                    await saveData();
+                    renderUI();
+                }
+                songActionsMenu.style.display = 'none';
+            });
+
+            // Add to live section
+            const addToLiveBtn = document.createElement('button');
+            addToLiveBtn.className = 'song-menu-btn';
+            const isLive = liveSongs.includes(song.name);
+            addToLiveBtn.textContent = isLive ? '🔴 Remove from Live' : '🟢 Add to Live';
+            addToLiveBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const songName = song.name;
+
+                if (!liveSongs.includes(songName)) {
+                    // Validate and repair song before adding to live
+                    const songToAdd = JSON.parse(JSON.stringify(song));
+                    const repaired = ensureSongDataIntegrity(songToAdd);
+                    const validation = validateSongForLive(repaired);
+
+                    if (!validation.valid) {
+                        // Show warning about missing data
+                        const warning = `Song is missing: ${validation.errors.join(', ')}. Auto-initializing...`;
+                        console.warn(warning);
+                    }
+
+                    liveSongs.push(songName);
+                    liveSongsData[songName] = repaired;
+                    addToLiveBtn.textContent = '🔴 Remove from Live';
+                } else {
+                    liveSongs = liveSongs.filter(n => n !== songName);
+                    delete liveSongsData[songName];
+                    addToLiveBtn.textContent = '🟢 Add to Live';
+                }
+
+                await saveData();
+                renderUI();
+                songActionsMenu.style.display = 'none';
+            });
+
+            songActionsMenu.appendChild(renameSongBtn);
+            songActionsMenu.appendChild(deleteSongBtn);
+            songActionsMenu.appendChild(addToLiveBtn);
+
+            songActionsBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                document.querySelectorAll('.song-actions-menu').forEach(menu => {
+                    if (menu !== songActionsMenu) menu.style.display = 'none';
+                });
+
+                const isHidden = songActionsMenu.style.display === 'none';
+                if (isHidden) {
+                    songActionsMenu.style.display = 'block';
+                    // Check if menu overflows right edge
+                    setTimeout(() => {
+                        const rect = songActionsMenu.getBoundingClientRect();
+                        if (rect.right > window.innerWidth) {
+                            songActionsMenu.classList.add('flipped');
+                        } else {
+                            songActionsMenu.classList.remove('flipped');
+                        }
+                    }, 0);
+                } else {
+                    songActionsMenu.style.display = 'none';
+                    songActionsMenu.classList.remove('flipped');
+                }
+            });
+
+            songNameContainer.appendChild(songActionsBtn);
+            songNameContainer.appendChild(songActionsMenu);
+            songItem.appendChild(songNameContainer);
+
+            songList.appendChild(songItem);
+        });
+
+        // Add new song button
+        const addSongLi = document.createElement('li');
+        const newSongBtn = document.createElement('button');
+        newSongBtn.className = 'newSongBtn';
+        newSongBtn.textContent = '+ Add New Song';
+        newSongBtn.addEventListener('click', () => {
+            // Create song with safe defaults
+            const newSong = {
+                name: 'Untitled',
+                url: mainPageUrl,
+                chords: [
+                    {
+                        section: 'Intro',
+                        chords: [{ beats: 4, chordLine: '• • • •' }]
+                    }
+                ],
+                originalKey: 'C',
+                beatsPerBar: 4,
+                chordsPerRow: 4,
+                songMap: []
+            };
+
+            appData[artistIdx].songs.push(newSong);
+            appData[artistIdx].songs.sort((a, b) =>
+                a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+            );
+
+            saveData();
+            renderUI();
+        });
+
+        addSongLi.appendChild(newSongBtn);
+        songList.appendChild(addSongLi);
+
+        dropdownMenu.appendChild(songList);
+        songContainer.appendChild(dropdownMenu);
+
+        // Toggle dropdown visibility
+        artistDiv.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = dropdownMenu.style.display === 'block';
+            document.querySelectorAll('.dropdown-menu').forEach(menu => {
+                menu.style.display = 'none';
+            });
+            dropdownMenu.style.display = isOpen ? 'none' : 'block';
+        });
+
+        container.appendChild(songContainer);
     });
+}
 
-    // Artist buttons
-    const containerBtn = document.createElement('div');
-    containerBtn.className = 'containerBtn';
+/**
+ * Helper: Handle artist rename with inline editing
+ */
+function handleArtistRename(artistIdx, artistDiv, menu) {
+    const currentName = artistDiv.textContent;
+    const newName = prompt('Enter new artist name:', currentName);
 
-    const renameBtn = document.createElement('button');
-    renameBtn.className = 'containerRenameBtn';
-    renameBtn.textContent = 'Rename';
-
-    // Rename artist button
-    renameBtn.onclick = () => {
-      // Make artistDiv contenteditable, but not the arrowSpan
-      artistDiv.contentEditable = 'true';
-      arrowSpan.contentEditable = 'false';
-      artistDiv.focus();
-
-      const range = document.createRange();
-      const sel = window.getSelection();
-      range.setStart(artistDiv.firstChild, artistDiv.firstChild.length);
-      range.collapse(true);
-      sel.removeAllRanges();
-      sel.addRange(range);
-
-      // Prevent editing the arrowSpan
-      function enforceNoArrowEdit() {
-        // Remove any accidental edits to the arrow
-        if (!artistDiv.textContent.endsWith(arrowSpan.textContent)) {
-          artistDiv.textContent = artistDiv.textContent.replace(arrowSpan.textContent, '');
-          artistDiv.appendChild(arrowSpan);
-        }
-      }
-
-      artistDiv.addEventListener('input', enforceNoArrowEdit);
-
-      function finishEdit() {
-        artistDiv.removeEventListener('input', enforceNoArrowEdit);
-        artistDiv.contentEditable = 'false';
-        // Save new name (without the arrow)
-        const newName = artistDiv.textContent.replace(arrowSpan.textContent, '').trim() || 'Unknown';
-        appData[artistIdx].artist = newName;
-
-        // Sort artist alphabetically
+    if (newName && newName.trim()) {
+        appData[artistIdx].artist = newName.trim();
         appData.sort((a, b) => a.artist.toLowerCase().localeCompare(b.artist.toLowerCase()));
+        saveData();
+        renderUI();
+    }
+
+    menu.style.display = 'none';
+}
+
+/**
+ * Helper: Handle song rename with inline editing
+ */
+function handleSongRename(artistIdx, songIdx, song, songLink) {
+    const currentName = song.name;
+    const newName = prompt('Enter new song name:', currentName);
+
+    if (newName && newName.trim()) {
+        const oldName = song.name;
+        const trimmedName = newName.trim();
+
+        appData[artistIdx].songs[songIdx].name = trimmedName;
+        appData[artistIdx].songs.sort((a, b) =>
+            a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+        );
+
+        // Update live songs
+        const liIdx = liveSongs.indexOf(oldName);
+        if (liIdx !== -1) {
+            liveSongs[liIdx] = trimmedName;
+        }
+        if (liveSongsData[oldName]) {
+            liveSongsData[trimmedName] = liveSongsData[oldName];
+            delete liveSongsData[oldName];
+        }
 
         saveData();
         renderUI();
-      }
-
-      artistDiv.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          finishEdit();
-        }
-      });
-
-      artistDiv.addEventListener('blur', finishEdit, { once: true });
-    };
-
-
-    // Artist delete button
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'containerDeleteBtn';
-    deleteBtn.textContent = 'Delete';
-    deleteBtn.onclick = async () => {
-      if (confirm('Delete this artist and all songs?\n(This action cannot be undone)')) {
-        const artistSongs = appData[artistIdx].songs.map(song => song.name); // get song names
-
-        // Remove from liveSongsData
-        let liveSongsDataObj = {};
-        if (liveSongsDataRaw !== "undefined") {
-          liveSongsDataObj = JSON.parse(liveSongsData);
-        }
-        // Remove from liveSongsData
-        artistSongs.forEach(song => {
-          delete liveSongsDataObj[song];
-        });
-
-        appData.splice(artistIdx, 1);
-        await saveData();
-        renderUI();
-      }
-    };
-
-
-    // Hide all containerBtn when clicking outside of .containerBtn or .artist
-    document.addEventListener('click', function (e) {
-      if (!e.target.closest('.containerBtn') && !e.target.classList.contains('artist')) {
-        document.querySelectorAll('.containerBtn').forEach(btn => {
-          btn.style.display = 'none';
-        });
-      }
-    });
-
-
-    containerBtn.appendChild(renameBtn);
-    containerBtn.appendChild(deleteBtn);
-    topContainer.appendChild(containerBtn);
-
-    songContainer.appendChild(topContainer);
-
-
-    // Dropdown menu
-    const dropdownMenu = document.createElement('div');
-    dropdownMenu.className = 'dropdown-menu';
-
-    const songList = document.createElement('ul');
-    songList.className = 'songList';
-
-    artistObj.songs.forEach((song, songIdx) => {
-      const songItem = document.createElement('li');
-      songItem.className = 'songItem';
-
-      const songName = document.createElement('span');
-      songName.className = 'songName';
-
-      const songLink = document.createElement('a');
-      songLink.className = 'songLink';
-      songLink.textContent = song.name;
-      songLink.href = song.url;
-
-      songName.appendChild(songLink);
-      songItem.appendChild(songName);
-
-      // Add click event to update the current song title
-      songLink.addEventListener('click', async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        // mark that the user wants the original view and which song to open
-        localStorage.setItem(`currentSongTitle_${currentUser}`, song.name);
-        localStorage.setItem(`liveSection_${currentUser}`, 'false');
-        localStorage.setItem(`openMapForSong_${currentUser}`, song.name);
-        // persist any pending changes (liveSongs/liveSongsData/appData) before navigation
-        await saveData();
-        window.location.href = song.url; // Navigate to the song URL
-      });
-
-      // Song edit buttons
-      const editBtn = document.createElement('span');
-      editBtn.className = 'editBtn';
-
-      // Rename song button
-      const renameSongBtn = document.createElement('button');
-      renameSongBtn.className = 'renameBtn';
-      renameSongBtn.textContent = '✏️';
-      
-      const handleRename = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        // Temporarily store href and disable the link
-        const originalHref = songLink.getAttribute('href');
-        songLink.removeAttribute('href');
-        songLink.style.pointerEvents = 'none';
-        songLink.setAttribute('contenteditable', 'true');
-        songLink.focus();
-
-        // Select all text inside the link
-        const range = document.createRange();
-        range.selectNodeContents(songLink);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-
-        function restore() {
-          songLink.removeAttribute('contenteditable');
-          const newName = songLink.textContent.trim() || 'Untitled';
-          songLink.setAttribute('href', originalHref);
-
-          // Store the index of the artist whose dropdown should be open
-          localStorage.setItem(`openDropdownArtistIdx_${currentUser}`, artistIdx);
-
-          // Update the song name
-          appData[artistIdx].songs[songIdx].name = newName;
-
-          // Sort songs alphabetically by name (case-insensitive)
-          appData[artistIdx].songs.sort((a, b) =>
-            a.name.toLowerCase().localeCompare(b.name.toLowerCase())
-          );
-
-          // Also, when renaming a song (inside restore() where you set newName), update live arrays/keys:
-          const oldName = song.name; // before rename
-          const newNameValue = newName; // your computed new name
-          appData[artistIdx].songs[songIdx].name = newNameValue;
-
-          // keep live lists in sync:
-          const liIdx = liveSongs.indexOf(oldName);
-          if (liIdx !== -1) {
-            liveSongs[liIdx] = newNameValue;
-          }
-          // move liveSongsData copy if present
-          if (liveSongsData && liveSongsData[oldName]) {
-            liveSongsData[newNameValue] = liveSongsData[oldName];
-            delete liveSongsData[oldName];
-          }
-          saveData();
-          renderUI();
-        }
-        songLink.addEventListener('blur', restore);
-        songLink.addEventListener('keydown', e => {
-          if (e.key === 'Enter') {
-            e.preventDefault(); // prevent newline
-            songLink.blur(); // trigger blur to save
-          }
-        });
-      };
-
-      renameSongBtn.onclick = handleRename;
-      renameSongBtn.ontouchend = handleRename;
-
-      // Delete song button
-      const deleteSongBtn = document.createElement('button');
-      deleteSongBtn.className = 'deleteBtn';
-      deleteSongBtn.textContent = '🗑️';
-      const handleDelete = async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (confirm(`Delete this song?\n Song Name: ${song.name}  \n (This action cannot be undone)`)) {
-          const songNameToDelete = song.name;
-
-          // Remove song from appData
-          appData[artistIdx].songs.splice(songIdx, 1);
-
-          delete liveSongsData[songNameToDelete];
-
-          // Remove from liveSongs
-          liveSongs = liveSongs.filter(name => name !== songNameToDelete);
-
-          localStorage.setItem(`openDropdownArtistIdx_${currentUser}`, artistIdx);
-
-          await saveData();
-          renderUI();
-        }
-      };
-
-      deleteSongBtn.onclick = handleDelete;
-      deleteSongBtn.ontouchend = handleDelete;
-
-      // Add to live button
-      const addToLiveBtn = document.createElement('button');
-      addToLiveBtn.className = 'addToLiveBtn';
-      addToLiveBtn.textContent = '🔴';
-      // Add the new song if not already in the list
-      if (liveSongs.includes(song.name)) {
-        addToLiveBtn.textContent = '🟢'; // Use green circle for "active"
-      }
-      else {
-        addToLiveBtn.textContent = '🔴'; // Use red circle for "inactive"
-      }
-      const handleAddToLive = async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const songName = song.name;
-
-        if (!liveSongs.includes(songName)) {
-          // add to live and create a fresh live copy from the original
-          liveSongs.push(songName);
-          liveSongsData[songName] = JSON.parse(JSON.stringify(song));
-          addToLiveBtn.textContent = '🟢';
-        } else {
-          // remove from live and delete live copy
-          liveSongs = liveSongs.filter(n => n !== songName);
-          if (liveSongsData && liveSongsData[songName]) delete liveSongsData[songName];
-          addToLiveBtn.textContent = '🔴';
-        }
-
-        // remember which artist dropdown to open
-        localStorage.setItem(`openDropdownArtistIdx_${currentUser}`, artistIdx);
-
-        // persist and re-render
-        await saveData();
-        renderUI();
-      }
-      
-      addToLiveBtn.onclick = handleAddToLive;
-      addToLiveBtn.ontouchend = handleAddToLive;
-
-      editBtn.appendChild(renameSongBtn);
-      editBtn.appendChild(deleteSongBtn);
-      editBtn.appendChild(addToLiveBtn);
-      songItem.appendChild(editBtn);
-
-      songList.appendChild(songItem);
-
-      // Hold tap the song name to show edit buttons
-      songName.addEventListener('touchstart', function (e) {
-        e.stopPropagation();
-        // Start the timer
-        holdTimeout = setTimeout(() => {
-          e.preventDefault(); // Prevent default link behavior
-        }, 100);
-      });
-    });
-
-
-    // Add New Song button
-    const addSongLi = document.createElement('li');
-    const newSongBtn = document.createElement('button');
-    newSongBtn.className = 'newSongBtn';
-    newSongBtn.textContent = 'Add New Song';
-    newSongBtn.onclick = () => {
-      // Add new song
-      appData[artistIdx].songs.push({ name: 'Untitled', url: 'Main Page.html' });
-
-      // Sort songs alphabetically by name (case-insensitive)
-      appData[artistIdx].songs.sort((a, b) =>
-        a.name.toLowerCase().localeCompare(b.name.toLowerCase())
-      );
-
-      saveData();
-      // Store the index of the artist whose dropdown should be open
-      localStorage.setItem(`openDropdownArtistIdx_${currentUser}`, artistIdx);
-      renderUI();
-    };
-
-
-    addSongLi.appendChild(newSongBtn);
-    songList.appendChild(addSongLi);
-
-    dropdownMenu.appendChild(songList);
-    songContainer.appendChild(dropdownMenu);
-
-    container.appendChild(songContainer);
-
-
-    // Dropdown toggle
-    artistDiv.onclick = () => {
-      dropdownMenu.style.display = dropdownMenu.style.display === 'block' ? 'none' : 'block';
-      // Close other dropdowns
-      document.querySelectorAll('.dropdown-menu').forEach(menu => {
-        if (menu !== dropdownMenu) menu.style.display = 'none';
-      });
-    };
-
-    artistDiv.ontouchstart = (e) => {
-      e.stopPropagation();
-      const currentTime = Date.now();
-      const timeDiff = currentTime - lastTap;
-
-      if (timeDiff < tapThreshold && timeDiff > 0) {
-        dropdownMenu.style.display = dropdownMenu.style.display === 'block' ? 'none' : 'block';
-        // Close other dropdowns
-        document.querySelectorAll('.dropdown-menu').forEach(menu => {
-          if (menu !== dropdownMenu) menu.style.display = 'none';
-        });
-      }
-      lastTap = currentTime;
     }
-
-  });
-
-
-  // Restore the open dropdown if it was saved
-  const openIdx = localStorage.getItem(`openDropdownArtistIdx_${currentUser}`);
-  if (openIdx !== null) {
-    // Find the nth .dropdown-menu and open it
-    const dropdowns = document.querySelectorAll('.dropdown-menu');
-    if (dropdowns[openIdx]) {
-      dropdowns[openIdx].style.display = 'block';
-    }
-    // Remove the marker so it doesn't affect other actions
-    localStorage.removeItem(`openDropdownArtistIdx_${currentUser}`);
-  }
 }
 
+/**
+ * ============================================
+ * DARK MODE TOGGLE
+ * ============================================
+ */
 
-// Hide all dropdown menus when clicking outside of .dropdown-menu or .artist
-document.addEventListener('click', function (e) {
-  if (!e.target.closest('.dropdown-menu') && !e.target.classList.contains('artist')) {
-    document.querySelectorAll('.dropdown-menu').forEach(menu => {
-      menu.style.display = 'none';
-    });
-  }
-});
-
-
-// --- Initial Render ---
-renderUI();
-initSearchBar();
-
-
-// --- Dark Mode ---
 async function darkMode() {
-  document.body.classList.toggle('dark-mode');
-  const isDarkMode = document.body.classList.contains('dark-mode');
-  const iconSpan = document.querySelector('#darkBtnIcon');
-  const textSpan = document.querySelector('#darkBtnSpan');
-  if (iconSpan && textSpan) {
-    if (isDarkMode) {
-      iconSpan.textContent = '☼';
-      textSpan.textContent = 'Light Mode';
-      iconSpan.style.height = '62px';
-      iconSpan.style.width = '64.5px';
-      if (window.innerWidth < 600) {
-        iconSpan.style.height = '36px';
-        iconSpan.style.width = '95px';
-      }
+    try {
+        const isDarkMode = document.body.classList.contains('dark-mode');
+        document.body.classList.toggle('dark-mode');
+
+        const darkBtn = document.getElementById('darkBtn');
+        const textSpan = document.querySelector('#darkBtnSpan');
+
+        if (!isDarkMode) {
+            if (darkBtn && textSpan) {
+                darkBtn.innerHTML = '☼';
+                textSpan.textContent = 'Light Mode';
+            }
+        } else {
+            if (darkBtn && textSpan) {
+                darkBtn.innerHTML = '☾⋆';
+                textSpan.textContent = 'Dark Mode';
+            }
+        }
+
+        if (currentUser) {
+            await firebase.firestore().collection('users').doc(currentUser).set({
+                darkMode: !isDarkMode
+            }, { merge: true });
+        }
+    } catch (error) {
+        console.error('Error toggling dark mode:', error);
     }
-    else {
-      iconSpan.textContent = '☾⋆';
-      textSpan.textContent = 'Dark Mode';
-      iconSpan.style.height = '70px';
-      iconSpan.style.width = '70px';
-      if (window.innerWidth < 600) {
-        iconSpan.style.height = '42px';
-        iconSpan.style.width = '102px';
-      }
-    }
-    await firebase.firestore().collection('users').doc(currentUser).set({
-      darkMode: isDarkMode
-    }, { merge: true });
-  }
 }
 
+/**
+ * ============================================
+ * LIVE SECTION & LOGOUT
+ * ============================================
+ */
 
-// --- Go To Live Section ---
 async function liveSection() {
-  const totalSongs = appData.reduce((sum, artist) => {
-    return sum + (Array.isArray(artist.songs) ? artist.songs.length : 0);
-  }, 0);
+    if (liveSongs.length === 0) {
+        alert('No songs in the Live section. Add songs from the home page first.');
+        return;
+    }
 
-  if (totalSongs > 0) {
-    // ensure the server copy is up-to-date before leaving
     localStorage.setItem(`liveSection_${currentUser}`, 'true');
-    await saveData();
-    window.location.href = "Main Page.html";
-  }
-  else {
-    alert("No songs made yet! Please add a song first.");
-  }
+    window.location.href = mainPageUrl;
 }
+
 window.liveSection = liveSection;
 
 function logOut() {
-  firebase.auth().signOut().then(() => {
-    window.location.href = "index.html";
-  }).catch((error) => {
-    alert("Error signing out: " + error.message);
-  });
+    if (confirm('Are you sure you want to log out?')) {
+        firebase.auth().signOut().catch((error) => {
+            console.error("Error logging out:", error);
+        });
+    }
 }
 
+/**
+ * ============================================
+ * CHANGE PASSWORD
+ * ============================================
+ */
 
-// --- 1. Corrected Change Password Listener ---
 document.getElementById('changePasswordBtn').addEventListener('click', async function () {
-  const newPassword = prompt("Enter your new password:");
-  if (!newPassword) {
-    alert("Password change cancelled.");
-    return;
-  }
-
-  const user = firebase.auth().currentUser;
-  if (user) {
     try {
-      await user.updatePassword(newPassword);
-      alert("Password updated successfully!");
+        const user = firebase.auth().currentUser;
+        if (!user) return;
+
+        const newPassword = prompt('Enter your new password (min 6 characters):');
+        if (!newPassword) return;
+
+        if (newPassword.length < 6) {
+            alert('Password must be at least 6 characters long.');
+            return;
+        }
+
+        await user.updatePassword(newPassword);
+        alert('Password changed successfully!');
     } catch (error) {
-      if (error.code === 'auth/requires-recent-login') {
-        alert("Please log out and log in again before changing your password.");
-      } else {
-        alert("Error updating password: " + error.message);
-      }
+        if (error.code === 'auth/requires-recent-login') {
+            alert('Please log out and log back in before changing your password.');
+        } else {
+            alert('Error: ' + error.message);
+        }
     }
-  } else {
-    alert("No user is currently logged in.");
-  }
 });
 
+/**
+ * ============================================
+ * LIVE SECTION HOVER & DRAG HANDLING
+ * ============================================
+ */
 
-// --- 2. GLOBAL HOVER & NAVIGATION LOGIC ---
 const liveBtnContainer = document.querySelector('.live-btn-container');
-liveBtnContainer.ontouchstart = (e) => {
-  e.stopPropagation();
-  holdTimer = setTimeout(() => {
-    if (liveBtnContainer.style.display !== 'block') {
-      e.preventDefault(); // Prevent the click event if it's a hold
-      showLiveHover();
-    }
-  }, 1000);
-};
-document.querySelector('.container').ontouchstart = () => {
-  renderUI(); // Re-render to ensure all dropdowns are closed
-  hideLiveHover(); // Hide live hover if clicking anywhere else on the container
-};
+if (liveBtnContainer) {
+    liveBtnContainer.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const dropdown = document.getElementById('liveDropdown');
+        if (dropdown?.style.display === 'block') {
+            hideLiveHover();
+        } else {
+            showLiveHover();
+        }
+    });
+
+    liveBtnContainer.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        showLiveHover();
+    });
+
+    liveBtnContainer.addEventListener('mouseover', () => {
+        showLiveHover();
+    });
+
+    liveBtnContainer.addEventListener('mouseout', () => {
+        hideLiveHover();
+    });
+}
+
+document.querySelector('.container')?.addEventListener('touchstart', () => {
+    hideLiveHover();
+});
 
 function showLiveHover() {
-  const dropdown = document.getElementById('liveDropdown');
-  if (!dropdown) return;
+    const dropdown = document.getElementById('liveDropdown');
+    if (!dropdown) return;
 
-  dropdown.innerHTML = '';
+    dropdown.innerHTML = '';
 
-  function getDragAfterElement(container, y) {
-    const draggableElements = [...container.querySelectorAll('.live-hover-item:not(.dragging)')];
-    return draggableElements.reduce((closest, child) => {
-      const box = child.getBoundingClientRect();
-      const offset = y - box.top - box.height / 2;
-      if (offset < 0 && offset > closest.offset) {
-        return { offset: offset, element: child };
-      } else {
-        return closest;
-      }
-    }, { offset: -Infinity }).element;
-  }
+    if (liveSongs.length === 0) {
+        const emptyMsg = document.createElement('div');
+        emptyMsg.className = 'live-hover-item';
+        emptyMsg.style.padding = '15px';
+        emptyMsg.textContent = 'No songs in live section';
+        dropdown.appendChild(emptyMsg);
+        dropdown.style.display = 'block';
+        return;
+    }
 
-  async function saveLiveOrder() {
-    const items = [...dropdown.querySelectorAll('.live-hover-item')];
-    liveSongs = items
-      .map(it => it.querySelector('.live-song-title')?.textContent.trim() || '')
-      .filter(name => name !== '');
+    // Drag-enabled live songs list
+    liveSongs.forEach((songName, idx) => {
+        const item = document.createElement('div');
+        item.className = 'live-hover-item';
+        item.dataset.index = idx;
 
-    await saveData();
-    renderUI();
-    showLiveHover();
-  }
+        const handle = document.createElement('span');
+        handle.className = 'live-drag-handle';
+        handle.textContent = '≡';
 
-  if (liveSongs.length === 0) {
-    dropdown.innerHTML = '<div class="live-hover-item">No live songs</div>';
-  }
-  else {
-    let touchStartY = null;
+        const title = document.createElement('span');
+        title.className = 'live-song-title';
+        title.textContent = songName;
 
-    liveSongs.forEach((songTitle, index) => {
-      const item = document.createElement('div');
-      item.className = 'live-hover-item';
+        // Desktop right click to remove from live
+        item.addEventListener('contextmenu', async (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            liveSongs.splice(idx, 1);
+            delete liveSongsData[songName];
+            await saveData();
+            renderUI();
+            showLiveHover();
+        });
 
-      const handle = document.createElement('span');
-      handle.className = 'live-drag-handle';
-      handle.textContent = '☰';
-      // For desktop, drag the entire item instead of handle for better target behavior
-      item.setAttribute('draggable', true);
-      handle.setAttribute('draggable', false);
+        // Mobile long-press to remove from live
+        let touchTimer;
+        item.addEventListener('touchstart', () => {
+            touchTimer = setTimeout(() => {
+                item.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+            }, 2000);
+        });
 
-      const titleSpan = document.createElement('span');
-      titleSpan.className = 'live-song-title';
-      titleSpan.textContent = songTitle;
+        item.addEventListener('touchend', () => {
+            clearTimeout(touchTimer);
+        });
 
-      item.appendChild(handle);
-      item.appendChild(titleSpan);
+        item.appendChild(handle);
+        item.appendChild(title);
 
-      // Navigation Logic
-      const navigateToSong = async () => {
-        localStorage.setItem(`currentSongTitle_${currentUser}`, songTitle);
-        localStorage.setItem(`openMapForSong_${currentUser}`, songTitle);
-        localStorage.setItem(`liveSection_${currentUser}`, 'false');
+        item.draggable = false;
+        handle.draggable = true;
 
-        await saveData();
-        window.location.href = 'Main Page.html';
-      };
+        /* DESKTOP DRAGGING */
+        // Drag events for reordering
+        handle.addEventListener('dragstart', (e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            item.classList.add('dragging');
+            window.draggedLiveIdx = idx;
+        });
 
-      // DESKTOP: Move by drag-and-drop using item (song row)
-      item.setAttribute('draggable', 'true');
-      handle.setAttribute('draggable', 'false');
+        handle.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            window.draggedLiveIdx = null;
+        });
 
-      item.addEventListener('dragstart', (e) => {
-        e.stopPropagation();
-        e.dataTransfer.effectAllowed = 'move';
-        // Required in some browsers for drag-and-drop to work reliably
-        e.dataTransfer.setData('text/plain', songTitle);
-        window.draggedLiveItem = item;
-        item.classList.add('dragging');
-      });
+        handle.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            item.classList.add('drag-over');
+        });
 
-      item.addEventListener('dragend', () => {
-        if (window.draggedLiveItem) {
-          window.draggedLiveItem.classList.remove('dragging');
-          window.draggedLiveItem = null;
-        }
-        document.querySelectorAll('.live-hover-item').forEach(it => it.classList.remove('drag-over'));
-      });
+        handle.addEventListener('dragleave', () => {
+            item.classList.remove('drag-over');
+        });
 
-      item.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const dragging = window.draggedLiveItem;
-        if (!dragging || dragging === item) return;
+        handle.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            item.classList.remove('drag-over');
+            if (window.draggedLiveIdx !== null && window.draggedLiveIdx !== idx) {
+                // Reorder live songs
+                const draggedSong = liveSongs[window.draggedLiveIdx];
+                liveSongs.splice(window.draggedLiveIdx, 1);
+                liveSongs.splice(idx, 0, draggedSong);
+                await saveData();
+                showLiveHover();
+            }
+        });
 
-        const afterElement = getDragAfterElement(dropdown, e.clientY);
-        if (afterElement == null) {
-          dropdown.appendChild(dragging);
-        } else {
-          dropdown.insertBefore(dragging, afterElement);
-        }
+        /* MOBILE DRAGGING (using touch events) */
+        let touchStartY = 0;
+        let isDragging = false;
+        handle.addEventListener('touchstart', (e) => {
+            touchStartY = e.touches[0].clientY;
+            isDragging = true;
+            item.classList.add('dragging');
+            window.draggedLiveIdx = idx;
+        });
 
-        await saveLiveOrder();
-      });
+        handle.addEventListener('touchmove', (e) => {
+            if (!isDragging) return;
+            const touchY = e.touches[0].clientY;
+            const deltaY = touchY - touchStartY;
+            item.style.transform = `translateY(${deltaY}px)`;
 
-      item.addEventListener('dragover', (e) => {
-        e.preventDefault();
-      });
+            // Determine potential drop target
+            const siblings = Array.from(dropdown.children);
+            siblings.forEach(sib => sib.classList.remove('drag-over'));
+            const hovered = siblings.find(sib => {
+                const rect = sib.getBoundingClientRect();
+                return touchY > rect.top && touchY < rect.bottom;
+            });
 
-      // DESKTOP: Right click delete on the row
-      item.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        deleteLiveSong(index);
-      });
+            if (hovered && hovered !== item) {
+                hovered.classList.add('drag-over');
+            }
+        });
 
-      // MOBILE: reordering via handle touch drag
-      handle.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+        handle.addEventListener('touchend', () => {
+            isDragging = false;
+            item.classList.remove('dragging');
+        });
+        handle.addEventListener('touchend', async (e) => {
+            const siblings = Array.from(dropdown.children);
+            const hovered = siblings.find(sib => sib.classList.contains('drag-over'));
+            if (window.draggedLiveIdx !== null && hovered && hovered !== item) {
+                const hoveredIdx = parseInt(hovered.dataset.index);
+                const draggedSong = liveSongs[window.draggedLiveIdx];
+                liveSongs.splice(window.draggedLiveIdx, 1);
+                liveSongs.splice(hoveredIdx, 0, draggedSong);
+                await saveData();
+                showLiveHover();
+            }
+            item.style.transform = '';
+            siblings.forEach(sib => sib.classList.remove('drag-over'));
+            window.draggedLiveIdx = null;
+        });
 
-        if (e.touches && e.touches.length === 1) {
-          touchStartY = e.touches[0].clientY;
-          window.draggedLiveItem = item;
-          item.classList.add('dragging');
-        }
-      }, { passive: false });
-
-      handle.addEventListener('touchmove', (e) => {
-        const dragging = window.draggedLiveItem;
-        if (!dragging || !e.touches || e.touches.length !== 1) return;
-        e.preventDefault();
-        e.stopPropagation();
-
-        const touchY = e.touches[0].clientY;
-        const afterElement = getDragAfterElement(dropdown, touchY);
-        if (afterElement == null) {
-          dropdown.appendChild(dragging);
-        } else {
-          dropdown.insertBefore(dragging, afterElement);
-        }
-      }, { passive: false });
-
-      handle.addEventListener('touchend', async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-
-        if (window.draggedLiveItem) {
-          window.draggedLiveItem.classList.remove('dragging');
-          window.draggedLiveItem = null;
-        }
-
-        await saveLiveOrder();
-      }, { passive: false });
-
-      handle.addEventListener('touchcancel', () => {
-        if (window.draggedLiveItem) {
-          window.draggedLiveItem.classList.remove('dragging');
-          window.draggedLiveItem = null;
-        }
-      });
-
-      // MOBILE: title action and long-press delete
-      let liveHoldTimer = null;
-      titleSpan.addEventListener('touchstart', () => {
-        liveHoldTimer = setTimeout(async () => {
-          liveHoldTimer = null;
-          await deleteLiveSong(index);
-        }, 2000);
-      }, { passive: true });
-
-      titleSpan.addEventListener('touchend', async (e) => {
-        if (liveHoldTimer) {
-          clearTimeout(liveHoldTimer);
-          liveHoldTimer = null;
-          e.preventDefault();
-          await navigateToSong();
-        }
-      });
-
-      titleSpan.addEventListener('touchcancel', () => {
-        if (liveHoldTimer) {
-          clearTimeout(liveHoldTimer);
-          liveHoldTimer = null;
-        }
-      });
-
-      // DESKTOP: pointer click navigation on title
-      titleSpan.onpointerdown = (e) => {
-        if (e.pointerType === 'mouse' && e.button === 0) {
-          navigateToSong();
-        }
-      };
-
-      dropdown.appendChild(item);
+        dropdown.appendChild(item);
     });
 
-    dropdown.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      const dragging = window.draggedLiveItem;
-      if (!dragging) return;
-
-      const afterElement = getDragAfterElement(dropdown, e.clientY);
-      if (afterElement == null) {
-        dropdown.appendChild(dragging);
-      } else {
-        dropdown.insertBefore(dragging, afterElement);
-      }
-    });
-
-    dropdown.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (window.draggedLiveItem) {
-        window.draggedLiveItem.classList.remove('dragging');
-        window.draggedLiveItem = null;
-      }
-      await saveLiveOrder();
-    });
-  }
-  dropdown.style.display = 'block';
+    dropdown.style.display = 'block';
 }
 
 function hideLiveHover() {
-  const dropdown = document.getElementById('liveDropdown');
-  if (dropdown) dropdown.style.display = 'none';
+    const dropdown = document.getElementById('liveDropdown');
+    if (dropdown) dropdown.style.display = 'none';
 }
 
-async function deleteLiveSong(index) {
-  const songName = liveSongs[index];
-  if (confirm(`Remove "${songName}" from Live list?`)) {
-    liveSongs.splice(index, 1);
-    delete liveSongsData[songName];
-    await saveData();
-    showLiveHover();
-    renderUI(); // Added to refresh the green/red dots on the main list
-  }
-}
+// Initialize on load
+renderUI();
+initSearchBar();
