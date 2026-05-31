@@ -517,18 +517,72 @@ body.loading {
 /* Position individual buttons */
 .live-btn-container {
     position: fixed;
-    bottom: 10px;
-    left: var(--spacing-lg);
-    z-index: 1100;
-    display: flex;
-    flex-direction: column;
+    bottom: var(--spacing-md);
+    left: 30px;
+    display: inline-flex;
     align-items: center;
+    justify-content: center;
+    background-color: var(--color-primary);
+    border-radius: 100px;
+    /* Perfect pill shape */
+    padding: 6px 20px 6px 6px;
+    height: 68px;
+    width: 150px;
+    /* Breathing room for circular dot + text */
+    box-shadow: 0 8px 24px rgba(0, 122, 255, 0.35);
+    z-index: 1000;
+    border: none;
+    cursor: pointer;
 }
 
 #liveBtn {
-    position: relative;
-    left: 0;
-    bottom: 0;
+    background-color: transparent;
+    color: white;
+    font-size: 18px;
+    font-weight: 600;
+    padding: 0;
+    margin: 0;
+    left: 90px;
+    border: none;
+    border-radius: 0;
+    cursor: pointer;
+}
+
+#liveBtn:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+/* Three dots alignment toggle */
+.live-dropdown-toggle {
+    background-color: rgba(255, 255, 255, 0.2);
+    /* Subtle translucent background */
+    color: white;
+    font-size: 18px;
+    width: 45px;
+    height: 45px;
+    margin: 0;
+    padding: 0;
+    position: absolute;
+    left: 12px;
+    border: none;
+    border-radius: 50%;
+    /* Perfect circular tap target */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    order: 1;
+    transition: background-color var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.live-dropdown-toggle:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+}
+
+.live-dropdown-toggle:active {
+    background-color: rgba(255, 255, 255, 0.25);
 }
 
 #darkBtn {
@@ -545,7 +599,7 @@ body.loading {
 }
 
 #addArtistBtn {
-    right: var(--spacing-md);
+    right: 50px;
 }
 
 /**
@@ -558,8 +612,7 @@ body.loading {
     display: none;
     position: absolute;
     bottom: 70px;
-    left: 150%;
-    transform: translateX(-50%);
+    left: 0;
     background-color: var(--color-background);
     border: 1px solid var(--color-border);
     border-radius: 12px;

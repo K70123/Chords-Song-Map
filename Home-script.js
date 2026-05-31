@@ -29,28 +29,19 @@ function safeObject(value) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+function hideAllMenus() {
+    document.querySelectorAll('.artist-actions-menu').forEach(menu => menu.style.display = 'none');
+    document.querySelectorAll('.song-actions-menu').forEach(menu => menu.style.display = 'none');
+    document.querySelectorAll('.dropdown-menu').forEach(menu => menu.style.display = 'none');
+    hideLiveHover();
+}
+
 function initializeGlobalClickHandler() {
     if (globalClickHandlersInitialized) return;
     globalClickHandlersInitialized = true;
 
     document.addEventListener('click', (e) => {
-        if (!e.target.closest('.artist-actions-btn') &&
-            !e.target.closest('.artist-actions-menu')) {
-            document.querySelectorAll('.artist-actions-menu').forEach(menu => menu.style.display = 'none');
-        }
-
-        if (!e.target.closest('.song-actions-btn') &&
-            !e.target.closest('.song-actions-menu')) {
-            document.querySelectorAll('.song-actions-menu').forEach(menu => menu.style.display = 'none');
-        }
-
-        if (!e.target.closest('.artist') && !e.target.closest('.dropdown-menu')) {
-            document.querySelectorAll('.dropdown-menu').forEach(menu => menu.style.display = 'none');
-        }
-
-        if (!e.target.closest('.live-btn-container') && !e.target.closest('#liveDropdown')) {
-            hideLiveHover();
-        }
+        hideAllMenus();
     });
 }
 
@@ -425,8 +416,6 @@ function renderUI() {
     const container = document.querySelector('.container');
     if (!container) return;
 
-    initializeGlobalClickHandler();
-
     if (appData.length > 0) {
         document.querySelector('.noArtist').style.display = 'none';
     } else {
@@ -714,6 +703,9 @@ function renderUI() {
 
         container.appendChild(songContainer);
     });
+
+    initializeGlobalClickHandler();
+    hideAllMenus();
 }
 
 /**
@@ -864,30 +856,47 @@ document.getElementById('changePasswordBtn').addEventListener('click', async fun
 
 const liveBtnContainer = document.querySelector('.live-btn-container');
 if (liveBtnContainer) {
-    liveBtnContainer.addEventListener('click', (e) => {
+    liveBtnContainer.addEventListener('click', async (e) => {
+        // Only navigate if clicking the main Live button, not the dropdown toggle
+        if (e.target.id === 'liveDropdownToggle' || e.target.closest('#liveDropdownToggle')) {
+            return; // Let the dropdown toggle handler deal with it
+        }
+
+        if (e.target.id !== 'liveBtn') return;
+
         e.preventDefault();
         e.stopPropagation();
-        const dropdown = document.getElementById('liveDropdown');
-        if (dropdown?.style.display === 'block') {
-            hideLiveHover();
-        } else {
-            showLiveHover();
+
+        // Navigate to main page with live section open
+        if (liveSongs.length === 0) {
+            alert('No songs in the Live section. Add songs from the home page first.');
+            return;
         }
+
+        localStorage.setItem(`liveSection_${currentUser}`, 'true');
+        window.location.href = mainPageUrl;
     });
 
-    liveBtnContainer.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        showLiveHover();
-    });
+    // Toggle dropdown when clicking the 3-dot button
+    const dropdownToggle = document.getElementById('liveDropdownToggle');
+    if (dropdownToggle) {
+        dropdownToggle.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const dropdown = document.getElementById('liveDropdown');
+            if (dropdown?.style.display === 'block') {
+                hideLiveHover();
+            } else {
+                showLiveHover();
+            }
+        });
+    }
+};
 
-    liveBtnContainer.addEventListener('mouseover', () => {
-        showLiveHover();
-    });
+liveBtnContainer.addEventListener('mouseout', () => {
+    hideLiveHover();
+});
 
-    liveBtnContainer.addEventListener('mouseout', () => {
-        hideLiveHover();
-    });
-}
 
 document.querySelector('.container')?.addEventListener('touchstart', () => {
     hideLiveHover();
