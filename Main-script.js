@@ -121,249 +121,6 @@ window.recordState = recordState;
 window.undo = undo;
 window.redo = redo;
 
-const STYLUS_QUICK_CHORDS = ['C', 'G', 'Am', 'F', 'Em', 'D', 'Bm'];
-let chordPaletteElement = null;
-let annotationCanvas = null;
-let annotationContext = null;
-let annotationState = {
-  drawing: false,
-  currentStroke: null,
-  pointerId: null,
-  startX: 0,
-  startY: 0,
-  isPotentialTap: false,
-  startChordSpan: null
-};
-
-function normalizePoint(x, y, width, height) {
-  return {
-    x: width > 0 ? x / width : 0,
-    y: height > 0 ? y / height : 0
-  };
-}
-
-function denormalizePoint(point, width, height) {
-  return {
-    x: (point.x || 0) * width,
-    y: (point.y || 0) * height
-  };
-}
-
-function ensureSongAnnotations(song) {
-  if (!song) return;
-  if (!Array.isArray(song.annotations)) song.annotations = [];
-}
-
-function getCanvasPoint(e) {
-  const rect = annotationCanvas.getBoundingClientRect();
-  const scale = window.devicePixelRatio || 1;
-  return {
-    x: (e.clientX - rect.left) * scale,
-    y: (e.clientY - rect.top) * scale
-  };
-}
-
-function redrawAnnotationCanvas(song) {
-  if (!annotationCanvas || !annotationContext || !song) return;
-  const rect = annotationCanvas.getBoundingClientRect();
-  const width = annotationCanvas.width;
-  const height = annotationCanvas.height;
-  annotationContext.clearRect(0, 0, width, height);
-  if (!Array.isArray(song.annotations)) return;
-  song.annotations.forEach(annotation => {
-    if (!Array.isArray(annotation.points)) return;
-    annotationContext.strokeStyle = annotation.color || '#000';
-    annotationContext.lineWidth = annotation.width || 3;
-    annotationContext.lineCap = 'round';
-    annotationContext.lineJoin = 'round';
-    annotationContext.beginPath();
-    annotation.points.forEach((point, idx) => {
-      const denorm = denormalizePoint(point, width, height);
-      if (idx === 0) annotationContext.moveTo(denorm.x, denorm.y);
-      else annotationContext.lineTo(denorm.x, denorm.y);
-    });
-    annotationContext.stroke();
-  });
-}
-
-function resizeAnnotationCanvas() {
-  if (!annotationCanvas) return;
-  const rect = annotationCanvas.getBoundingClientRect();
-  const scale = window.devicePixelRatio || 1;
-  annotationCanvas.width = rect.width * scale;
-  annotationCanvas.height = rect.height * scale;
-  annotationContext.setTransform(scale, 0, 0, scale, 0, 0);
-  redrawAnnotationCanvas(currentSongData);
-}
-
-function initAnnotationCanvas(wrapper, song) {
-  if (!wrapper) return;
-  wrapper.style.position = wrapper.style.position || 'relative';
-  annotationCanvas = wrapper.querySelector('#annotationCanvas');
-  if (!annotationCanvas) {
-    annotationCanvas = document.createElement('canvas');
-    annotationCanvas.id = 'annotationCanvas';
-    annotationCanvas.className = 'annotationCanvas';
-    wrapper.appendChild(annotationCanvas);
-    annotationCanvas.addEventListener('pointerdown', handleAnnotationPointerDown);
-    annotationCanvas.addEventListener('pointermove', handleAnnotationPointerMove);
-    annotationCanvas.addEventListener('pointerup', handleAnnotationPointerUp);
-    annotationCanvas.addEventListener('pointercancel', handleAnnotationPointerUp);
-    window.addEventListener('resize', resizeAnnotationCanvas);
-  }
-  annotationContext = annotationCanvas.getContext('2d');
-  resizeAnnotationCanvas();
-  ensureSongAnnotations(song);
-  redrawAnnotationCanvas(song);
-}
-
-function handleAnnotationPointerDown(e) {
-  if (!annotationCanvas || e.pointerType !== 'pen') return;
-  annotationCanvas.setPointerCapture(e.pointerId);
-  annotationState.drawing = true;
-  annotationState.pointerId = e.pointerId;
-  annotationState.startX = e.clientX;
-  annotationState.startY = e.clientY;
-  annotationState.isPotentialTap = true;
-  annotationState.startChordSpan = document.elementFromPoint(e.clientX, e.clientY)?.closest('.chord') || null;
-  const point = getCanvasPoint(e);
-  annotationState.currentStroke = [point];
-  annotationContext.beginPath();
-  annotationContext.moveTo(point.x, point.y);
-  annotationContext.strokeStyle = '#000';
-  annotationContext.lineWidth = 3;
-  annotationContext.lineCap = 'round';
-  annotationContext.lineJoin = 'round';
-}
-
-function handleAnnotationPointerMove(e) {
-  if (!annotationState.drawing || e.pointerType !== 'pen' || e.pointerId !== annotationState.pointerId) return;
-  const distance = Math.hypot(e.clientX - annotationState.startX, e.clientY - annotationState.startY);
-  if (annotationState.isPotentialTap && distance > 10) {
-    annotationState.isPotentialTap = false;
-  }
-  if (annotationState.isPotentialTap) return;
-  const point = getCanvasPoint(e);
-  annotationState.currentStroke.push(point);
-  annotationContext.lineTo(point.x, point.y);
-  annotationContext.stroke();
-}
-
-function handleAnnotationPointerUp(e) {
-  if (e.pointerId !== annotationState.pointerId) return;
-  annotationCanvas.releasePointerCapture(e.pointerId);
-  if (annotationState.isPotentialTap && annotationState.startChordSpan) {
-    const sectionIdx = Number(annotationState.startChordSpan.dataset.sectionIndex);
-    const chordIdx = Number(annotationState.startChordSpan.dataset.chordIndex);
-    showChordPalette(e.clientX, e.clientY, sectionIdx, chordIdx);
-    annotationState.drawing = false;
-    annotationState.currentStroke = null;
-    annotationState.startChordSpan = null;
-    return;
-  }
-  if (!annotationState.drawing) return;
-  annotationState.drawing = false;
-  if (!currentSongData) return;
-  ensureSongAnnotations(currentSongData);
-  const stroke = annotationState.currentStroke.map(pt => normalizePoint(pt.x, pt.y, annotationCanvas.width, annotationCanvas.height));
-  currentSongData.annotations.push({
-    id: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2),
-    type: 'stroke',
-    color: '#000',
-    width: 3,
-    points: stroke
-  });
-  annotationState.currentStroke = null;
-  annotationState.startChordSpan = null;
-  saveData();
-}
-
-function createChordInput(chordSpan, sectionIdx, chordIdx) {
-  if (!currentSongData) return;
-  const existingText = chordSpan.textContent.trim();
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'chord-input';
-  input.value = existingText;
-  input.autocapitalize = 'none';
-  input.spellcheck = false;
-  input.style.minHeight = '44px';
-  input.style.width = '100%';
-  input.style.boxSizing = 'border-box';
-  input.addEventListener('pointerdown', (e) => {
-    e.stopPropagation();
-  });
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      input.blur();
-    }
-  });
-  input.addEventListener('blur', () => {
-    const newValue = input.value.trim();
-    if (!currentSongData || !Array.isArray(currentSongData.chords)) return;
-    recordState();
-    if (newValue === '') {
-      currentSongData.chords[sectionIdx].chords.splice(chordIdx, 1);
-    } else {
-      currentSongData.chords[sectionIdx].chords[chordIdx] = newValue;
-    }
-    saveData();
-    renderUI();
-  });
-  chordSpan.replaceWith(input);
-  input.focus();
-}
-
-function buildChordPalette() {
-  chordPaletteElement = document.createElement('div');
-  chordPaletteElement.id = 'stylusChordPalette';
-  chordPaletteElement.className = 'stylusChordPalette';
-  chordPaletteElement.style.display = 'none';
-  STYLUS_QUICK_CHORDS.concat(['✎']).forEach(chord => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = chord;
-    button.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const sectionIdx = Number(chordPaletteElement.dataset.sectionIdx);
-      const chordIdx = Number(chordPaletteElement.dataset.chordIdx);
-      if (!currentSongData || !Array.isArray(currentSongData.chords) || !currentSongData.chords[sectionIdx]) return;
-      if (chord === '✎') {
-        const target = document.querySelector(`[data-section-index="${sectionIdx}"][data-chord-index="${chordIdx}"]`);
-        if (target) createChordInput(target, sectionIdx, chordIdx);
-      } else {
-        currentSongData.chords[sectionIdx].chords[chordIdx] = chord;
-        saveData();
-        renderUI();
-      }
-      hideChordPalette();
-    });
-    chordPaletteElement.appendChild(button);
-  });
-  document.body.appendChild(chordPaletteElement);
-  document.addEventListener('pointerdown', (e) => {
-    if (!chordPaletteElement) return;
-    if (!e.target.closest('#stylusChordPalette') && !e.target.closest('.chord')) {
-      hideChordPalette();
-    }
-  });
-}
-
-function showChordPalette(x, y, sectionIdx, chordIdx) {
-  if (!chordPaletteElement) buildChordPalette();
-  chordPaletteElement.dataset.sectionIdx = sectionIdx;
-  chordPaletteElement.dataset.chordIdx = chordIdx;
-  chordPaletteElement.style.display = 'grid';
-  chordPaletteElement.style.left = Math.min(window.innerWidth - 260, x + 10) + 'px';
-  chordPaletteElement.style.top = Math.min(window.innerHeight - 220, y + 10) + 'px';
-}
-
-function hideChordPalette() {
-  if (!chordPaletteElement) return;
-  chordPaletteElement.style.display = 'none';
-}
-
 // Keyboard shortcuts (Ctrl/Cmd+Z and Ctrl/Cmd+Y / Ctrl+Shift+Z)
 document.addEventListener('keydown', function (e) {
   const meta = e.ctrlKey || e.metaKey;
@@ -1470,18 +1227,6 @@ function renderUI() {
       renderUI(); // Re-render UI to reflect changes
     });
 
-    // Mobile tap to select song
-    li.addEventListener('touchend', function () {
-      localStorage.setItem(`currentSongTitle_${currentUser}`, songName);
-      if (title) title.textContent = songName; // Update the title
-      liveContainer.style.display = 'none'; // Hide the dropdown after selection
-      const rightContainer = document.querySelector('.rightContainer');
-      if (rightContainer) rightContainer.innerHTML = `<div class="chordsContainer"></div>`;
-
-      saveData(); // Save the current song title
-      renderUI(); // Re-render UI to reflect changes
-    });
-
     // Remove live songs from localStorage on right-click
     li.addEventListener('contextmenu', async function (e) {
       e.preventDefault();
@@ -1598,10 +1343,7 @@ function renderUI() {
   rightContainer.prepend(titleDiv);
 
   const container = document.querySelector('.rightContainer .chordsContainer');
-  container.style.position = 'relative';
   container.innerHTML = ""; // Clear previous content
-  currentSongData = currentSongObj;
-  initAnnotationCanvas(container, currentSongObj);
 
   // Always add the "Original Key" span at the top
   const oriKeySpan = document.createElement('span');
@@ -1760,7 +1502,7 @@ function renderUI() {
   // Chord Sections Display
   chordsPerRow = currentSongObj?.chordsPerRow || 4;
   if (container && currentSongObj && Array.isArray(currentSongObj.chords)) {
-    currentSongObj.chords.forEach((section, sectionIdx) => {
+    currentSongObj.chords.forEach(section => {
       const songSectionContainer = document.createElement('div');
       songSectionContainer.className = 'songSectionContainer';
 
@@ -1786,8 +1528,6 @@ function renderUI() {
 
           const chordSpan = document.createElement('span');
           chordSpan.className = 'chord';
-          chordSpan.dataset.sectionIndex = sectionIdx;
-          chordSpan.dataset.chordIndex = i + j;
 
           const fromKey = currentSongObj.originalKey;
           const toKey = currentSongObj.currentKey || fromKey;
@@ -1854,40 +1594,105 @@ function renderUI() {
     });
 
 
-    // Double click / stylus tap edit support for chords
+    // Double click to edit chords
     const chordSpans = container.querySelectorAll('.chord');
     chordSpans.forEach(chordSpan => {
-      const sectionIdx = Number(chordSpan.dataset.sectionIndex);
-      const chordIdx = Number(chordSpan.dataset.chordIndex);
-
-      let pointerDownInfo = { x: 0, y: 0, type: '' };
-      chordSpan.addEventListener('pointerdown', function (e) {
-        pointerDownInfo = { x: e.clientX, y: e.clientY, type: e.pointerType };
-      });
-
-      chordSpan.addEventListener('pointerup', function (e) {
-        if (e.pointerType === 'pen') {
-          const distance = Math.hypot(e.clientX - pointerDownInfo.x, e.clientY - pointerDownInfo.y);
-          if (distance < 12) {
-            showChordPalette(e.clientX, e.clientY, sectionIdx, chordIdx);
-          }
-        }
-      });
-
       chordSpan.addEventListener('dblclick', function (e) {
         e.preventDefault();
-        createChordInput(chordSpan, sectionIdx, chordIdx);
+        chordSpan.contentEditable = true;
+        chordSpan.focus();
       });
-
+      // Double tap to edit chord
       chordSpan.addEventListener('touchend', function () {
-        const currentTime = Date.now();
+        const currentTime = new Date().getTime();
         const tapLength = currentTime - lastTap;
+
         if (tapLength < dblTapThreshold && tapLength > 0) {
-          createChordInput(chordSpan, sectionIdx, chordIdx);
+          chordSpan.contentEditable = true;
+          chordSpan.focus();
+          document.execCommand('selectAll', false, null);
         }
         lastTap = currentTime;
       });
+      // Go to next chord on Enter key
+      chordSpan.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          e.preventDefault(); // Prevent default Enter behavior
+          setTimeout(() => chordSpan.blur(), 0);
+          // Find all chord spans in the current section
+          const section = chordSpan.closest('.songSectionContainer');
+          const allSections = Array.from(container.querySelectorAll('.songSectionContainer'));
+          const sectionIdx = allSections.indexOf(section);
+          const allChords = Array.from(section.querySelectorAll('.chord'));
+          const idx = allChords.indexOf(chordSpan);
+
+          // Focus the next chord in the section, if it exists
+          if (idx > -1 && idx < allChords.length - 1) {
+            nextChordFocus = { sectionIdx, chordIdx: idx + 1 };
+          } else if (sectionIdx < allSections.length - 1) {
+            nextChordFocus = { sectionIdx: sectionIdx + 1, chordIdx: 0 };
+          } else {
+            nextChordFocus = null; // No next chord to focus
+          }
+          chordSpan.blur();
+        }
+      });
+      // Set the chordSpan to be uneditable
+      chordSpan.addEventListener('blur', function () {
+        recordState();
+        chordSpan.contentEditable = false;
+
+        const section = chordSpan.closest('.songSectionContainer');
+        const allSections = Array.from(container.querySelectorAll('.songSectionContainer'));
+        const sectionIdx = allSections.indexOf(section);
+        const chordIdx = Array.from(section.querySelectorAll('.chord')).indexOf(chordSpan);
+
+        const chordText = chordSpan.textContent.trim();
+
+        const originalKey = currentSongObj.originalKey || "C";
+        const selectedKey = currentSongObj.currentKey || originalKey;
+
+        if (!currentSongObj) return;
+
+        // If the chordSpan is empty, remove it
+        if (chordText === '') {
+          if (currentSongObj && currentSongObj.chords[sectionIdx] && currentSongObj.chords[sectionIdx].chords) {
+            currentSongObj.chords[sectionIdx].chords.splice(chordIdx, 1);
+            // Remove the line
+            const line = chordSpan.previousElementSibling;
+            if (line && line.classList.contains('line')) {
+              line.remove();
+            }
+
+            chordSpan.remove();
+
+            // Remove the section if no chords left
+            if (currentSongObj.chords[sectionIdx].chords.length === 0) {
+              currentSongObj.chords.splice(sectionIdx, 1);
+            }
+          }
+        }
+        else {
+          const numberRegex = /^([1-7])([b#]?)(.*)$/;
+          const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
+
+          if (numberRegex.test(chordText) && !nashvilleMode) {
+            const [, number, accidental, suffix] = chordText.match(numberRegex);
+            const converted = transposeChord(number + accidental + suffix, 'C', selectedKey);
+            currentSongObj.chords[sectionIdx].chords[chordIdx] = transposeChord(converted, selectedKey, originalKey);
+            chordSpan.textContent = converted;
+          }
+          else {
+            const chordInOriginalKey = transposeChord(chordText, selectedKey, originalKey);
+            currentSongObj.chords[sectionIdx].chords[chordIdx] = chordInOriginalKey;
+            chordSpan.textContent = transposeChord(chordInOriginalKey, originalKey, selectedKey);
+          }
+        }
+        saveData();
+        renderUI();
+      });
     });
+
 
     // Only one <hr> at the bottom
     const hr = document.createElement('hr');
@@ -2191,47 +1996,24 @@ function renderUI() {
         await saveReorder();
       });
 
-      // === Stylus drag for song map parts ===
-      let pointerDragState = {
-        active: false,
-        pointerId: null
-      };
-
-      part.style.touchAction = 'none';
-      part.addEventListener('pointerdown', (e) => {
-        if (e.pointerType !== 'pen' && e.pointerType !== 'touch' && e.pointerType !== 'mouse') return;
-        e.preventDefault();
-        e.stopPropagation();
+      // === Mobile Drag ===
+      let startY = 0;
+      part.addEventListener('touchstart', (e) => {
+        // record snapshot once at touch start for mobile drag
         recordState();
-        pointerDragState.active = true;
-        pointerDragState.pointerId = e.pointerId;
+        startY = e.touches[0].clientY;
         part.classList.add('dragging');
-        part.setPointerCapture(e.pointerId);
-      });
-
-      part.addEventListener('pointermove', (e) => {
-        if (!pointerDragState.active || e.pointerId !== pointerDragState.pointerId) return;
         e.preventDefault();
-        const after = getDragAfterElement(songMapList, e.clientY);
-        const dragging = document.querySelector('.songMapPart.dragging');
-        if (!dragging) return;
+      });
+      part.addEventListener('touchmove', (e) => {
+        const touchY = e.touches[0].clientY;
+        const after = getDragAfterElement(songMapList, touchY);
+        const dragging = document.querySelector('.dragging');
         if (after == null) songMapList.appendChild(dragging);
         else songMapList.insertBefore(dragging, after);
       });
-
-      part.addEventListener('pointerup', async (e) => {
-        if (!pointerDragState.active || e.pointerId !== pointerDragState.pointerId) return;
-        pointerDragState.active = false;
+      part.addEventListener('touchend', async () => {
         part.classList.remove('dragging');
-        part.releasePointerCapture(e.pointerId);
-        await saveReorder();
-      });
-
-      part.addEventListener('pointercancel', async (e) => {
-        if (!pointerDragState.active || e.pointerId !== pointerDragState.pointerId) return;
-        pointerDragState.active = false;
-        part.classList.remove('dragging');
-        part.releasePointerCapture(e.pointerId);
         await saveReorder();
       });
 
@@ -2239,17 +2021,14 @@ function renderUI() {
     });
 
     // Shared dragover for desktop
-    if (!songMapList.dataset.dragoverAttached) {
-      songMapList.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        const after = getDragAfterElement(songMapList, e.clientY);
-        const dragging = document.querySelector('.songMapPart.dragging');
-        if (!dragging) return;
-        if (after == null) songMapList.appendChild(dragging);
-        else songMapList.insertBefore(dragging, after);
-      });
-      songMapList.dataset.dragoverAttached = 'true';
-    }
+    songMapList.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const after = getDragAfterElement(songMapList, e.clientY);
+      const dragging = document.querySelector('.dragging');
+      if (!dragging) return;
+      if (after == null) songMapList.appendChild(dragging);
+      else songMapList.insertBefore(dragging, after);
+    });
 
     function getDragAfterElement(container, y) {
       const elements = [...container.querySelectorAll('.songMapPart:not(.dragging)')];
@@ -2519,25 +2298,43 @@ document.addEventListener('click', function (e) {
   }
 });
 
-// Touch support for hiding the container
 document.addEventListener('touchstart', function (e) {
   const container = document.querySelector('.leftContainer');
+  const buttons = document.querySelectorAll('.menuBtn');
+  const menu = document.querySelector('.menu');
 
   // If the container is not visible, do nothing
   if (!container || container.style.display === 'none') return;
 
-  // If the click is outside the container and not on the button that shows it
-  if (!container.contains(e.target) || e.target.matches('#hideShowBtn')) {
-    const container = document.querySelector('.leftContainer');
-
-    // If the container is not visible, do nothing
-    if (!container || container.style.display === 'none') return;
-
-    // If the click is outside the container and not on the button that shows it
-    if (!container.contains(e.target) && !e.target.matches('#hideShowBtn')) {
+  // If the user presses one of the button in the menu except the hideShowBtn
+  if (menu.contains(e.target) && !e.target.matches('#hideShowBtn')) {
+    setTimeout(() => {
       container.style.display = 'none';
       document.body.classList.remove('dimmed');
-    }
+
+      buttons.forEach(button => {
+        button.style.display = 'none';
+        button.style.fontSize = '18px';
+        button.style.margin = '0';
+        document.getElementById('hideShowBtn').style.display = 'block'
+      });
+      menu.style.width = '20px';
+      menu.style.height = '22px';
+    }, 300);
+  }
+  // If the click is outside the container and not on the button that shows it
+  else if (!container.contains(e.target) && !e.target.matches('#hideShowBtn')) {
+    container.style.display = 'none';
+    document.body.classList.remove('dimmed');
+
+    buttons.forEach(button => {
+      button.style.display = 'none';
+      button.style.fontSize = '18px';
+      button.style.margin = '0';
+      document.getElementById('hideShowBtn').style.display = 'block'
+    });
+    menu.style.width = '20px';
+    menu.style.height = '22px';
   }
 });
 
