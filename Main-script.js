@@ -2258,30 +2258,10 @@ function hideShow() {
   if (container.style.display === 'none' || container.style.display === '') {
     container.style.display = 'block';
     document.body.classList.add('dimmed');
-    if (window.innerWidth < 600) {
-      buttons.forEach(button => {
-        button.style.display = 'block';
-        button.style.fontSize = '34px';
-        button.style.margin = '10px';
-      });
-      menu.style.width = '38px';
-      menu.style.height = '100%';
-    }
   }
   else {
     container.style.display = 'none';
     document.body.classList.remove('dimmed');
-
-    if (window.innerWidth < 600) {
-      buttons.forEach(button => {
-        button.style.display = 'none';
-        button.style.fontSize = '18px';
-        button.style.margin = '0';
-        document.getElementById('hideShowBtn').style.display = 'block'
-      });
-      menu.style.width = '20px';
-      menu.style.height = '22px';
-    }
   }
 }
 // Hide the container if you click outside of it
@@ -2304,41 +2284,15 @@ document.addEventListener('touchstart', function (e) {
   const menu = document.querySelector('.menu');
 
   // If the container is not visible, do nothing
-  if (!container || container.style.display === 'none') return;
-
-  // If the user presses one of the button in the menu except the hideShowBtn
-  if (menu.contains(e.target) && !e.target.matches('#hideShowBtn')) {
-    setTimeout(() => {
-      container.style.display = 'none';
-      document.body.classList.remove('dimmed');
-
-      buttons.forEach(button => {
-        button.style.display = 'none';
-        button.style.fontSize = '18px';
-        button.style.margin = '0';
-        document.getElementById('hideShowBtn').style.display = 'block'
-      });
-      menu.style.width = '20px';
-      menu.style.height = '22px';
-    }, 300);
-  }
-  // If the click is outside the container and not on the button that shows it
-  else if (!container.contains(e.target) && !e.target.matches('#hideShowBtn')) {
+  if (!container || container.style.display === 'none') return; 
+  
+  // If the touch is outside the container and not on the button that shows it
+  if (!container.contains(e.target) && !e.target.matches('#hideShowBtn')) {
     container.style.display = 'none';
     document.body.classList.remove('dimmed');
-
-    buttons.forEach(button => {
-      button.style.display = 'none';
-      button.style.fontSize = '18px';
-      button.style.margin = '0';
-      document.getElementById('hideShowBtn').style.display = 'block'
-    });
-    menu.style.width = '20px';
-    menu.style.height = '22px';
   }
+
 });
-
-
 
 // --- Manual Page ---
 function manual() {
