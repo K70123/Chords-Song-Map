@@ -677,80 +677,31 @@ body.loading {
  * RESPONSIVE DESIGN FOR TABLET & LANDSCAPE
  * ============================================
  */
-
-/* iPad Pro 11" and larger landscape */
-@media screen and (min-width: 1024px) and (orientation: landscape) {
-    .container {
-        grid-template-columns: repeat(3, 1fr);
-        padding: 0 var(--spacing-xl);
-    }
-
-    .topContainer {
-        min-height: 52px;
-    }
-
-    .artist {
-        font-size: 28px;
-    }
-}
-
-/* iPad and tablet portrait */
-@media screen and (max-width: 768px) {
-    .container {
-        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-        gap: var(--spacing-md);
-        padding: 0 var(--spacing-sm) var(--spacing-lg);
-    }
-
-    #title {
-        font-size: 32px;
-        margin: var(--spacing-lg) var(--spacing-md);
-    }
-
-    .search-container {
-        margin: 0 auto var(--spacing-md);
-    }
-
-    .artist {
-        font-size: 20px;
-    }
-
-    .song-actions-menu {
-        right: auto;
-        left: 0;
-    }
-
-    .artist-actions-menu {
-        right: auto;
-        left: 0;
-    }
-
+/* iPad 11 portrait */
+@media only screen and (device-width: 834px) and (device-height: 1194px) and (orientation: portrait)  {
     .bottomBtn {
-        width: 56px;
-        height: 56px;
         font-size: 24px;
         bottom: var(--spacing-md);
     }
 
     #darkBtn {
-        right: var(--spacing-md);
+        right: 50%;
     }
 
     #logOut {
-        right: var(--spacing-lg) + 68px;
+        left: 40%;
+    }
+
+    #changePasswordBtn {
+        right: 40%;
     }
 
     #addArtistBtn {
         right: 10px;
     }
 
-    .song-actions-menu {
-        left: 35%;
-    }
-
-    .artist-actions-menu {
-        top: 0;
-        left: 45%;
+    #liveBtn {
+        left: 10px;
     }
 }
 
