@@ -678,40 +678,25 @@ body.loading {
  * ============================================
  */
 /* iPad 11 portrait */
-@media only screen 
-and (min-device-width: 768px)
-and (max-device-width: 1780px)
-and (min-device-height: 1024px)
-and (max-device-height: 2480px)
-and (orientation: portrait)  {
-    .bottomBtn {
-        font-size: 24px;
-        bottom: var(--spacing-md);
+@media only screen
+and (min-width: 768px) {
+    #logOut {
+        left: 30%;
     }
-
     #darkBtn {
         right: 50%;
+        transform: translateX(50%);
     }
-
-    #logOut {
-        left: 40%;
-    }
-
     #changePasswordBtn {
-        right: 40%;
+        right: 30%;
     }
-
     #addArtistBtn {
-        right: 10px;
-    }
-
-    #liveBtn {
-        left: 10px;
+        right: 5%;
     }
 }
 
 /* Small phones */
-@media screen and (max-width: 480px) {
+@media screen and (max-width: 500px) {
     .container {
         grid-template-columns: 1fr;
         gap: var(--spacing-sm);
@@ -728,15 +713,38 @@ and (orientation: portrait)  {
     }
 
     .bottomBtn {
-        width: 52px;
-        height: 52px;
-        font-size: 20px;
-        bottom: var(--spacing-sm);
+        width: 45px;
+        height: 45px;
+        font-size: 15px;
     }
 
     .live-btn-container {
         bottom: var(--spacing-sm);
         left: var(--spacing-sm);
+        height: 46px;
+        width: 100px;
+    }
+    .live-dropdown-toggle {
+        width: 30px;
+        height: 30px;
+        left: 10px;
+    }
+    #liveBtn {
+        font-size: 12px;
+        left: 13%;
+    }
+    #logOut {
+        left: 30%;
+    }
+    #darkBtn {
+        right: 50%;
+        transform: translateX(50%);
+    }
+    #changePasswordBtn {
+        right: 30%;
+    }
+    #addArtistBtn {
+        right: 5%;
     }
 
     .topContainer {
