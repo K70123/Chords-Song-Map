@@ -138,7 +138,7 @@ button {
     top: 50%;
     border: 2px solid;
     padding: 6px;
-    width: 210px;
+    min-width: 210px;
     transform: translateY(-50%);
     height: 550px;
     overflow-y: auto;
@@ -535,13 +535,13 @@ ul {
 }
 
 /* iPad 11 portrait */
-@media only screen and (min-width: 768px) {
+@media only screen and (min-width: 768px) and (max-width: 1040px) {
     .songMapContainer,
     .liveSongMapContainer {
         margin: 5px;
         right: 0;
         padding: 2px;
-        width: 150px;
+        min-width: 150px;
         transform: translateY(-50%);
         height: 550px;
         /*Stops it from being scrolled left and right*/
@@ -563,6 +563,9 @@ ul {
         height: 100%;
         padding-left: 18px;
         font-size: 33px;
+    }
+    .rightContainer {
+        padding-left: 38px;
     }
     .sectionTitle {
         margin: 6px 0 6px 6px;
