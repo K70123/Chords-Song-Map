@@ -233,48 +233,6 @@ body.dark-mode .addPartBtn {
     position: relative;
 }
 
-.annotationCanvas {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 1100;
-    pointer-events: auto;
-    touch-action: pan-y;
-}
-
-.stylusChordPalette {
-    position: absolute;
-    z-index: 1100;
-    display: grid;
-    grid-template-columns: repeat(4, minmax(64px, 1fr));
-    gap: 8px;
-    background: rgba(34, 34, 34, 0.96);
-    color: white;
-    padding: 12px;
-    border-radius: 16px;
-    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.35);
-    min-width: 220px;
-    pointer-events: auto;
-}
-
-.stylusChordPalette button {
-    min-height: 44px;
-    min-width: 44px;
-    border: none;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.12);
-    color: white;
-    font-size: 18px;
-    cursor: pointer;
-    padding: 10px;
-}
-
-.stylusChordPalette button:hover {
-    background: rgba(255, 255, 255, 0.22);
-}
-
 .keyContainer {
     margin-top: 20px;
     display: grid;
@@ -576,8 +534,44 @@ ul {
     color: white;
 }
 
-@media only screen and (max-width: 600px) {
+/* iPad 11 portrait */
+@media only screen and (min-width: 768px) {
+    .songMapContainer,
+    .liveSongMapContainer {
+        margin: 5px;
+        right: 0;
+        padding: 2px;
+        width: 160px;
+        transform: translateY(-50%);
+        height: 550px;
+    }
+    .songMapTitle {
+        font-size: 28px;
+    }
 
+    .songMapList {
+        font-size: 24px;
+        padding: 3px;
+        margin: 10px;
+    }
+
+    .rightContainer,
+    .liveRightContainer {
+        width: 100%;
+        height: 100%;
+        padding-left: 18px;
+        font-size: 33px;
+    }
+    .sectionTitle {
+        margin: 5px 0 5px 6px;
+    }
+    .chord {
+        min-height: 44px;
+        padding: 5px 7px;
+    }
+}
+
+@media only screen and (max-width: 600px) {
     #undoBtn,
     #redoBtn {
         bottom: 10px;
