@@ -1227,6 +1227,19 @@ function renderUI() {
       renderUI(); // Re-render UI to reflect changes
     });
 
+    //Mobile: tap to go to the song
+    li.addEventListener('touchend', function () {
+      localStorage.setItem(`currentSongTitle_${currentUser}`, songName);
+      if (title) title.textContent = songName; // Update the title
+      liveContainer.style.display = 'none'; // Hide the dropdown after selection
+      const rightContainer = document.querySelector('.rightContainer');
+      if (rightContainer) rightContainer.innerHTML = `<div class="chordsContainer"></div>`;
+
+      saveData(); // Save the current song title
+      renderUI(); // Re-render UI to reflect changes
+    });
+
+
     // Remove live songs from localStorage on right-click
     li.addEventListener('contextmenu', async function (e) {
       e.preventDefault();
@@ -1252,6 +1265,7 @@ function renderUI() {
       renderUI();
     });
 
+    // Hold-Tap to remove song from live songs
     li.addEventListener('touchstart', function (e) {
       // Start the timer
       e.preventDefault();
