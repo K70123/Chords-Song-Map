@@ -541,9 +541,11 @@ ul {
         margin: 5px;
         right: 0;
         padding: 2px;
-        width: 160px;
+        width: 150px;
         transform: translateY(-50%);
         height: 550px;
+        /*Stops it from being scrolled left and right*/
+        overflow-x: hidden;
     }
     .songMapTitle {
         font-size: 28px;
@@ -563,7 +565,7 @@ ul {
         font-size: 33px;
     }
     .sectionTitle {
-        margin: 5px 0 5px 6px;
+        margin: 6px 0 6px 6px;
     }
     .chord {
         min-height: 44px;
