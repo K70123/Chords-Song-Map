@@ -561,11 +561,13 @@ ul {
     .liveRightContainer {
         width: 100%;
         height: 100%;
-        padding-left: 18px;
         font-size: 33px;
     }
     .rightContainer {
         padding-left: 38px;
+    }
+    .liveRightContainer {
+        padding: 0;
     }
     .sectionTitle {
         margin: 6px 0 6px 6px;
