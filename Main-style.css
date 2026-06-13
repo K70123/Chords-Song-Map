@@ -568,7 +568,7 @@ ul {
     }
     .liveRightContainer {
         padding-left: 0;
-        margin-left: -5px;
+        margin-left: 0;
     }
     .sectionTitle {
         margin: 6px 0 6px 6px;
