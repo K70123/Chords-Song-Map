@@ -224,8 +224,6 @@ body.loading {
 .artist-actions-btn {
     min-width: 44px;
     min-height: 44px;
-    width: 44px;
-    height: 44px;
     padding: var(--spacing-sm);
     border: none;
     border-radius: 8px;
@@ -362,8 +360,6 @@ body.loading {
 .song-actions-btn {
     min-width: 44px;
     min-height: 44px;
-    width: 44px;
-    height: 44px;
     padding: var(--spacing-sm);
     border: none;
     border-radius: 6px;
@@ -400,11 +396,6 @@ body.loading {
     z-index: 1000;
     min-width: 190px;
     overflow: hidden;
-}
-
-.song-actions-menu.flipped {
-    left: auto;
-    right: 15%;
 }
 
 .song-menu-btn {
@@ -703,55 +694,114 @@ body.loading {
     }
 
     #title {
-        font-size: 22px;
+        font-size: 24px;
         margin: var(--spacing-md) var(--spacing-sm);
     }
 
-    .search-results {
-        max-height: 200px;
-    }
-
-    .bottomBtn {
-        width: 35px;
-        height: 35px;
-        font-size: 13px;
-    }
-
-    .live-btn-container {
-        bottom: var(--spacing-sm);
-        left: var(--spacing-sm);
-        height: 36px;
-        width: 75px;
-    }
-    .live-dropdown-toggle {
-        width: 20px;
-        height: 20px;
-        left: 10px;
-    }
-    #liveBtn {
-        font-size: 10px;
-        left: 9%;
-    }
-    #logOut {
-        left: 30%;
-    }
-    #darkBtn {
-        right: 50%;
-        transform: translateX(50%);
-    }
-    #changePasswordBtn {
-        right: 30%;
-    }
-    #addArtistBtn {
-        right: 5%;
-    }
-
-    .topContainer {
-        gap: var(--spacing-xs);
-    }
 
     .artist {
         font-size: 18px;
+    }
+    .artist-actions-menu {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        min-width: 120px;
+    }
+    .artist-menu-btn {
+        width: 100%;
+        padding: 12px;
+        font-size: 13px;
+        min-height: 44px;
+    }
+
+    .song-actions-menu {
+        transform: translateX(-100%);
+        min-width: 150px;
+    }
+    .song-menu-btn {
+        width: 100%;
+        padding: 10px;
+        font-size: 13px;
+        min-height: 40px;
+    }
+
+    .songLink {
+        font-size: 13px;
+    }
+    .newSongBtn {
+        width: 100%;
+        padding: var(--spacing-md);
+        font-size: 13px;
+        min-height: 44px;
+    }
+
+
+    .search-results {
+        max-height: 100px;
+    }
+    #songSearchInput {
+        font-size: 14px;
+        padding: 7px;
+    }
+    .search-results .empty, .search-result-item{
+        font-size: 14px;
+    }
+
+
+    .container {
+        margin-top: -10px;
+    }
+
+
+    .bottomBtn {
+        width: 40px;
+        height: 40px;
+        font-size: 14px;
+    }
+    .live-btn-container {
+        bottom: var(--spacing-sm);
+        left: var(--spacing-sm);
+        height: 41px;
+        width: 95px;
+        bottom: 10px;
+    }
+    .live-dropdown-toggle {
+        width: 30px;
+        height: 30px;
+        left: 10px;
+    }
+    .live-hover-dropdown {
+        bottom: 110%;
+        left: 0;
+        min-width: 160px;
+        max-height: 150px;
+        padding: 0;
+    }
+    .live-hover-item {
+        padding: 9px 6px;
+        font-size: 12px;
+        min-height: 36px;
+        margin-bottom: 0;
+    }
+
+    #liveBtn {
+        font-size: 12px;
+        left: 15%;
+        bottom: 10px;
+    }
+
+    #logOut {
+        left: 34%;
+    }
+    #darkBtn {
+        left: 50%;
+    }
+    #changePasswordBtn {
+        right: 28%;
+    }
+    #addArtistBtn {
+        right: 5%;
     }
 }
 
