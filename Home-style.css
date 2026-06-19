@@ -755,20 +755,20 @@ body.loading {
 
 
     .bottomBtn {
-        width: 40px;
-        height: 40px;
-        font-size: 14px;
+        width: 50px;
+        height: 50px;
+        font-size: 16px;
     }
     .live-btn-container {
         bottom: var(--spacing-sm);
         left: var(--spacing-sm);
-        height: 41px;
-        width: 95px;
+        height: 51px;
+        width: 110px;
         bottom: 10px;
     }
     .live-dropdown-toggle {
-        width: 30px;
-        height: 30px;
+        width: 38px;
+        height: 38px;
         left: 10px;
     }
     .live-hover-dropdown {
@@ -787,8 +787,10 @@ body.loading {
 
     #liveBtn {
         font-size: 12px;
-        left: 15%;
+        left: 15.5%;
         bottom: 10px;
+        padding: 0;
+        border-radius: 50%;
     }
 
     #logOut {
