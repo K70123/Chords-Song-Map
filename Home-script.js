@@ -890,6 +890,16 @@ if (liveBtnContainer) {
                 showLiveHover();
             }
         });
+        dropdownToggle.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const dropdown = document.getElementById('liveDropdown');
+            if (dropdown?.style.display === 'block') {
+                hideLiveHover();
+            } else {
+                showLiveHover();
+            }
+        });
     }
 };
 

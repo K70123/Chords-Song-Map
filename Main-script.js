@@ -588,7 +588,7 @@ function showAllLiveSongsAndSections() {
       // Container for song title and changeSongMapBtn
       const topContainer = document.createElement('div');
       topContainer.className = 'topContainer';
-      if (window.innerWidth < 600) {
+      if (window.innerWidth < 500) {
         topContainer.style.justifyContent = 'left';
         topContainer.style.paddingLeft = '40px';
       }
@@ -610,7 +610,7 @@ function showAllLiveSongsAndSections() {
         // Warning (or whatever you want to call it)
         const warning = document.createElement('div');
         warning.style.fontSize = '30px';
-        if (window.innerWidth < 600) {
+        if (window.innerWidth < 500) {
           warning.style.fontSize = '13px';
         }
         warning.className = 'warning'
@@ -661,7 +661,7 @@ function showAllLiveSongsAndSections() {
       const beatDisplay = document.createElement('span');
       beatDisplay.innerHTML = `Beats Per Bar: <span class="beatSpan">${songObj?.beatsPerBar || '4'}</span>`;
       beatDisplay.style.fontSize = '30px';
-      if (window.innerWidth < 600) {
+      if (window.innerWidth < 500) {
         beatDisplay.style.fontSize = '13px';
       }
       chordsContainer.appendChild(beatDisplay);
@@ -670,7 +670,7 @@ function showAllLiveSongsAndSections() {
       const chordsPerRowSpan = document.createElement('span');
       chordsPerRowSpan.innerHTML = `Chords Per Row: <span class="chordsPerRow">${songObj?.chordsPerRow || '4'}</span>`;
       chordsPerRowSpan.style.fontSize = '30px';
-      if (window.innerWidth < 600) {
+      if (window.innerWidth < 500) {
         chordsPerRowSpan.style.fontSize = '13px';
       }
       chordsContainer.appendChild(chordsPerRowSpan);
@@ -1173,15 +1173,14 @@ function renderUI() {
   const buttons = document.querySelectorAll('.menuBtn');
   const menu = document.querySelector('.menu');
 
-  if (window.innerWidth < 600) {
+  if (window.innerWidth < 500) {
     buttons.forEach(button => {
       button.style.display = 'none';
-      button.style.fontSize = '18px';
-      button.style.margin = '0';
+      button.style.fontSize = '20px';
       document.getElementById('hideShowBtn').style.display = 'block'
     });
-    menu.style.width = '20px';
-    menu.style.height = '22px';
+    menu.style.width = '25px';
+    menu.style.height = '25px';
   }
 
   // Left Container
@@ -1378,7 +1377,7 @@ function renderUI() {
   const chordsPerRowSpan = document.createElement('span');
   chordsPerRowSpan.innerHTML = `Chords Per Row: <span class="chordsPerRow">${currentSongObj?.chordsPerRow || '4'}</span>`;
   chordsPerRowSpan.style.fontSize = '30px';
-  if (window.innerWidth < 600) {
+  if (window.innerWidth < 500) {
     chordsPerRowSpan.style.fontSize = '13px';
   }
   container.appendChild(chordsPerRowSpan);
@@ -2262,22 +2261,43 @@ function home() {
 }
 
 
-// --- Hide/Show Data ---
-
+// --- Hide/Show left container ---
 function hideShow() {
   const container = document.querySelector('.leftContainer');
   const buttons = document.querySelectorAll('.menuBtn');
   const menu = document.querySelector('.menu');
 
+  // If container is hidden, show it and adjust styles; if visible, hide it and reset styles
   if (container.style.display === 'none' || container.style.display === '') {
     container.style.display = 'block';
     document.body.classList.add('dimmed');
+
+    if (window.innerWidth <= 500) {
+      buttons.forEach(button => {
+        button.style.display = 'block';
+        button.style.fontSize = '30px';
+      });
+      menu.style.width = '40px';
+      menu.style.height = '100%';
+    }
   }
   else {
     container.style.display = 'none';
     document.body.classList.remove('dimmed');
+
+    if (window.innerWidth < 500) {
+      buttons.forEach(button => {
+        button.style.display = 'none';
+        button.style.fontSize = '18px';
+        document.getElementById('hideShowBtn').style.display = 'block'
+      });
+      menu.style.width = '25px';
+      menu.style.height = '25px';
+    }
   }
 }
+
+
 // Hide the container if you click outside of it
 document.addEventListener('click', function (e) {
   const container = document.querySelector('.leftContainer');
@@ -2292,7 +2312,8 @@ document.addEventListener('click', function (e) {
   }
 });
 
-document.addEventListener('touchstart', function (e) {
+// Hide the container if you tap outside of it on mobile
+document.addEventListener('touchend', function (e) {
   const container = document.querySelector('.leftContainer');
   const buttons = document.querySelectorAll('.menuBtn');
   const menu = document.querySelector('.menu');
@@ -2304,6 +2325,14 @@ document.addEventListener('touchstart', function (e) {
   if (!container.contains(e.target) && !e.target.matches('#hideShowBtn')) {
     container.style.display = 'none';
     document.body.classList.remove('dimmed');
+
+    buttons.forEach(button => {
+      button.style.display = 'none';
+      button.style.fontSize = '18px';
+      document.getElementById('hideShowBtn').style.display = 'block'
+    });
+    menu.style.width = '25px';
+    menu.style.height = '25px';
   }
 
 });

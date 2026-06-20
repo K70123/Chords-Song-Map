@@ -308,17 +308,6 @@ body.dark-mode .key {
     background-color: rgba(0, 122, 255, 0.14);
 }
 
-.chord-input {
-    min-height: 44px;
-    width: 100%;
-    padding: 10px 12px;
-    font-size: 18px;
-    border-radius: 12px;
-    border: 1px solid #757678;
-    background-color: rgba(255, 255, 255, 0.95);
-    color: #000;
-}
-
 .chord-row {
     display: flex;
     align-items: center;
@@ -568,7 +557,7 @@ ul {
     }
     .liveRightContainer {
         padding-left: 0;
-        margin-left: 0;
+        margin-left: -20px;
     }
     .sectionTitle {
         margin: 6px 0 6px 6px;
@@ -579,35 +568,14 @@ ul {
     }
 }
 
-@media only screen and (max-width: 600px) {
-    #undoBtn,
-    #redoBtn {
-        bottom: 10px;
-        padding: 8px 10px;
-        font-size: 12px;
-        border-radius: 8px;
-    }
-
-    #undoBtn {
-        left: 5%;
-    }
-
-    #redoBtn {
-        right: 5%;
-    }
-
+@media only screen and (max-width: 500px) {
     .title {
-        font-size: 17px;
+        font-size: 25px;
     }
-
     .liveRightContainer .title {
         text-align: left;
     }
 
-    button {
-        font-size: 18px;
-        margin: 0;
-    }
 
     .leftContainer {
         width: 130px;
@@ -615,66 +583,64 @@ ul {
         padding-top: 16px;
         padding-inline: 8px;
     }
-
-    .menu {
-        width: 30px;
-        height: 22px;
-        padding-top: 0;
+    menu {
+        padding: 0;
     }
-
-    #mainBtn,
-    #darkBtn,
-    #manualBtn {
+    .menuBtn {
         display: none;
+        font-size: 30px;
+        margin-top: 0;
     }
-
     .dropdown-menu {
         width: 100px;
     }
-
     .liveTitle {
         font-size: 20px;
     }
-
     .artistName {
         font-size: 15px;
     }
-
     .songName {
         font-size: 15px;
     }
-
     .line {
         margin: 0 1.5px;
     }
 
 
+    .changeSongMapBtn {
+        font-size: 16px;
+        width: 26px;
+        height: 24px;
+        margin-right: 6px;
+        margin-top: 5px;
+        padding: 0;
+    }
     .songMapContainer,
     .liveSongMapContainer {
         padding: 1px;
         padding-top: 2px;
-        width: 80px;
+        min-width: 80px;
         height: 400px;
-        right: 0;
-        border: 0.2px 0.2px solid;
+        right: 2%;
     }
-
     .songMapTitle {
         font-size: 14px;
         margin-bottom: 8px;
     }
-
     .songMapList {
-        font-size: 12px;
-        padding: 0;
+        font-size: 13px;
         margin: 0;
-        margin-bottom: 14px;
+        padding: 0;
     }
-
+    .songMapPart {
+        min-height: 26px;
+        padding: 3px 6px;
+    }
     .addPartBtn {
         font-size: 20px;
         width: 20px;
-        margin-top: 0;
+        margin-top: 6px;
         height: 20px;
     }
 
@@ -685,64 +651,52 @@ ul {
         justify-content: flex-start;
         margin-left: 5px;
     }
-
     .key {
-        font-size: 13px;
+        font-size: 14px;
         padding: 4px;
         margin: 0;
     }
-
     .numKey {
         font-size: 11px;
     }
 
+
     .rightContainer,
     .liveRightContainer {
-        padding: 1.5px;
-        font-size: 16px;
+        padding: 2px;
+        font-size: 15px;
     }
-
     .songSectionContainer {
         width: 100%;
     }
-
     .sectionTitle {
-        margin-bottom: 4px;
-        margin-left: 6px;
-        font-size: 16px;
-        margin-top: 6px;
+        margin: 3px 0 4px 4px;
+        font-size: 15px;
     }
-
+    .chord {
+        min-height: 36px;
+        padding: 0 5px;
+    }
+    .chord-row {
+        margin: 0;
+    }
     .addChordSectionBtn {
         font-size: 26px;
         width: 26px;
         height: 26px;
     }
-
     .addChordBtn,
     .deleteSectionBtn {
         font-size: 20px;
         width: 26px;
-        height: 20px;
+        height: 26px;
         border: 1px solid;
+        margin: 0 8px;
     }
-
     .deleteSectionBtn {
         font-size: 12px;
     }
 
-    .changeSongMapBtn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 16px;
-        width: 26px;
-        height: 24px;
-        margin-right: 6px;
-        margin-top: 5px;
-        padding: 0;
-        border: 1px solid;
-    }
 
     .notesContainer {
         margin-top: 20px;
@@ -750,19 +704,30 @@ ul {
         margin-left: 1%;
         margin-right: 230px;
         margin-bottom: 50px;
-        align-self: flex-start;
-        position: relative;
     }
-
     .notesTitle {
         font-size: 25px;
     }
-
     .notesArea {
         width: 90%;
         min-height: 100px;
         padding: 5px;
         margin: 10px;
         font-size: 14px;
+    }
+
+
+    #undoBtn,
+    #redoBtn {
+        bottom: 5%;
+        padding: 8px 10px;
+        font-size: 15px;
+        border-radius: 8px;
+    }
+    #undoBtn {
+        left: 5%;
+    }
+    #redoBtn {
+        right: 5%;
     }
 }
