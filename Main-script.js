@@ -2326,13 +2326,15 @@ document.addEventListener('touchend', function (e) {
     container.style.display = 'none';
     document.body.classList.remove('dimmed');
 
-    buttons.forEach(button => {
-      button.style.display = 'none';
-      button.style.fontSize = '18px';
-      document.getElementById('hideShowBtn').style.display = 'block'
-    });
-    menu.style.width = '25px';
-    menu.style.height = '25px';
+    if (window.innerWidth < 500) {
+      buttons.forEach(button => {
+        button.style.display = 'none';
+        button.style.fontSize = '18px';
+        document.getElementById('hideShowBtn').style.display = 'block'
+      });
+      menu.style.width = '25px';
+      menu.style.height = '25px';
+    }
   }
 
 });
