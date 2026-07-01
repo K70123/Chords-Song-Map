@@ -229,6 +229,10 @@ body.dark-mode .addPartBtn {
     font-size: 40px;
 }
 
+.rightContainer {
+    padding-left: 20px;
+}
+
 .chordsContainer {
     position: relative;
 }
@@ -557,7 +561,7 @@ ul {
     }
     .liveRightContainer {
         padding-left: 0;
-        margin-left: -20px;
+        margin-left: 0;
     }
     .sectionTitle {
         margin: 6px 0 6px 6px;
