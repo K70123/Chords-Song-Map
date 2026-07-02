@@ -238,9 +238,9 @@ body.dark-mode .addPartBtn {
 }
 
 .keyContainer {
-    margin-top: 20px;
+    margin-top: 12px;
     display: grid;
-    grid-template-columns: 60px 60px 60px 60px 60px 60px 60px 60px 60px;
+    grid-template-columns: 50px 50px 50px 50px 50px 50px 50px 55px 55px;
     color: black;
     justify-content: center;
 }
@@ -253,7 +253,7 @@ body.dark-mode .keyContainer {
     font-size: 20px;
     padding: 5px;
     border: 1px solid #757678;
-    margin: 2px;
+    margin: 1px;
     cursor: pointer;
     color: black;
 }
