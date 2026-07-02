@@ -713,6 +713,7 @@ function showAllLiveSongsAndSections() {
       originalKeySpan.className = 'originalKey';
       const oriKey = songObj.originalKey || 'Unknown';
       if (originalKeySpan) {
+        originalKeySpan.style.fontSize = '28px';
         originalKeySpan.textContent = "Original Key: " + oriKey; // Display the original key
       }
       chordsContainer.appendChild(originalKeySpan);
@@ -721,7 +722,7 @@ function showAllLiveSongsAndSections() {
       // Beats per bar
       const beatDisplay = document.createElement('span');
       beatDisplay.innerHTML = `Beats Per Bar: <span class="beatSpan">${songObj?.beatsPerBar || '4'}</span>`;
-      beatDisplay.style.fontSize = '30px';
+      beatDisplay.style.fontSize = '23px';
       if (window.innerWidth < 500) {
         beatDisplay.style.fontSize = '13px';
       }
@@ -730,7 +731,7 @@ function showAllLiveSongsAndSections() {
       // Add the chordsperrow span
       const chordsPerRowSpan = document.createElement('span');
       chordsPerRowSpan.innerHTML = `Chords Per Row: <span class="chordsPerRow">${songObj?.chordsPerRow || '4'}</span>`;
-      chordsPerRowSpan.style.fontSize = '30px';
+      chordsPerRowSpan.style.fontSize = '23px';
       if (window.innerWidth < 500) {
         chordsPerRowSpan.style.fontSize = '13px';
       }
