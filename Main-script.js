@@ -139,8 +139,28 @@ document.addEventListener('keydown', function (e) {
   }
 });
 
-function transposeChord(chord, fromKey, toKey) {
-  const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
+function transposeNoteBySemitone(note, semitones, preferFlats = false) {
+  const normalized = String(note || '').replace('♭', 'b');
+  const chromaticSharps = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const chromaticFlats = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+  const chromatic = preferFlats || normalized.includes('b') ? chromaticFlats : chromaticSharps;
+  const index = chromatic.indexOf(normalized);
+  if (index === -1) return normalized;
+  return chromatic[(index + semitones + 12) % 12];
+}
+
+function parseChordToken(chord) {
+  const normalized = String(chord || '').replace('♭', 'b').trim();
+  const match = normalized.match(/^([A-G])([#b]?)(.*)$/);
+  if (!match) return null;
+  return {
+    root: `${match[1]}${match[2] || ''}`,
+    suffix: match[3] || ''
+  };
+}
+
+function transposeChord(chord, fromKey, toKey, options = {}) {
+  const { asNashville = false } = options;
 
   // Chromatic scales
   const chromaticSharps = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -150,34 +170,33 @@ function transposeChord(chord, fromKey, toKey) {
     return note.includes('b') || note.includes('♭');
   }
 
-  chord = chord.replace('♭', 'b');
-  fromKey = fromKey.replace('♭', 'b');
-  toKey = toKey.replace('♭', 'b');
+  let normalizedChord = String(chord || '').replace('♭', 'b').trim();
+  if (!normalizedChord) return '';
 
-  // Convert Nashville number (e.g. "6b", "4#", etc.) to letter chord before continuing
-  const numberMatch = chord.match(/^([1-7])([b#]?)(.*)$/);
+  // Interpret Nashville numbers relative to the provided key before transposing.
+  const numberMatch = normalizedChord.match(/^([1-7])([b#]?)(.*)$/);
   if (numberMatch) {
     const [, number, accidental, suffix] = numberMatch;
-    const numberIndex = parseInt(number, 10) - 1;
-    const scaleSemitones = [0, 2, 4, 5, 7, 9, 11];
-    const sharpScale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-
-    const baseSemitone = scaleSemitones[numberIndex];
-    let finalSemitone = baseSemitone;
-
-    if (accidental === '#') finalSemitone = (baseSemitone + 1) % 12;
-    if (accidental === 'b') finalSemitone = (baseSemitone + 11) % 12;
-
-    const chordRoot = sharpScale[finalSemitone];
-
-    chord = chordRoot + (suffix || '');
+    const degreeIndex = parseInt(number, 10) - 1;
+    const scale = getMajorScale(fromKey);
+    const preferFlats = usesFlat(fromKey) || usesFlat(toKey) || ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb'].includes(String(fromKey || '').replace('♭', 'b')) || ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb'].includes(String(toKey || '').replace('♭', 'b'));
+    if (degreeIndex >= 0 && degreeIndex < scale.length) {
+      let root = scale[degreeIndex];
+      if (accidental === '#') root = transposeNoteBySemitone(root, 1, preferFlats);
+      if (accidental === 'b') root = transposeNoteBySemitone(root, -1, preferFlats);
+      normalizedChord = root + (suffix || '');
+    }
   }
 
-  const match = chord.match(/^([A-G][b#]?)(.*)$/);
-  if (!match) return chord;
+  normalizedChord = normalizedChord.replace('♭', 'b');
+  fromKey = String(fromKey || '').replace('♭', 'b');
+  toKey = String(toKey || '').replace('♭', 'b');
 
-  let [, root, suffix] = match;
-  const useFlats = usesFlat(root) || usesFlat(toKey);
+  const parsedChord = parseChordToken(normalizedChord);
+  if (!parsedChord) return normalizedChord;
+
+  const { root, suffix } = parsedChord;
+  const useFlats = usesFlat(root) || usesFlat(toKey) || usesFlat(fromKey) || ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb'].includes(String(toKey || '').replace('♭', 'b')) || ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb'].includes(String(fromKey || '').replace('♭', 'b'));
   const chromatic = useFlats ? chromaticFlats : chromaticSharps;
 
   const fromIdx = chromaticSharps.indexOf(fromKey) !== -1
@@ -189,54 +208,72 @@ function transposeChord(chord, fromKey, toKey) {
     : chromaticFlats.indexOf(toKey);
 
   const rootIdx = chromatic.indexOf(root);
-  if (fromIdx === -1 || toIdx === -1 || rootIdx === -1) return chord;
+  if (fromIdx === -1 || toIdx === -1 || rootIdx === -1) return normalizedChord;
 
   const shift = (toIdx - fromIdx + 12) % 12;
   const newIndex = (rootIdx + shift) % 12;
   const newRoot = chromatic[newIndex];
 
-  if (nashvilleMode) {
-    const nashvilleNumbersSharps = ['1', '1#', '2', '2#', '3', '4', '4#', '5', '5#', '6', '6#', '7'];
-    const nashvilleNumbersFlats = ['1', '2b', '2', '3b', '3', '4', '5b', '5', '6b', '6', '7b', '7'];
-
-    let keyIdx = chromatic.indexOf(toKey);
-    if (keyIdx === -1) keyIdx = chromatic.indexOf(fromKey);
-    const relIdx = (chromatic.indexOf(newRoot) - keyIdx + 12) % 12;
-    const nashNum = useFlats ? nashvilleNumbersFlats[relIdx] : nashvilleNumbersSharps[relIdx];
-
-    return nashNum + suffix;
+  if (asNashville) {
+    return convertToNashville(newRoot + suffix, toKey);
   }
 
   return newRoot + suffix;
 }
 
 function getMajorScale(key) {
+  const normalizedKey = String(key || '').replace('♭', 'b').trim();
   const semitoneMap = {
     C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3,
     E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8,
     A: 9, 'A#': 10, Bb: 10, B: 11,
   };
 
-  const sharpScale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const chromaticSharps = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const chromaticFlats = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
   const steps = [0, 2, 4, 5, 7, 9, 11]; // Major scale intervals in semitones
+  const preferFlats = normalizedKey.includes('b') || ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb'].includes(normalizedKey);
+  const chromatic = preferFlats ? chromaticFlats : chromaticSharps;
 
-  const startIndex = semitoneMap[key];
+  const startIndex = semitoneMap[normalizedKey];
   if (startIndex === undefined) return ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 
-  return steps.map(step => sharpScale[(startIndex + step) % 12]);
+  return steps.map(step => chromatic[(startIndex + step) % 12]);
 }
 function convertToNashville(chord, key) {
-  const scale = getMajorScale(key);
-  const match = chord.match(/^([A-G][#b]?)(.*)?$/);
-  if (!match) return chord;
+  const normalizedChord = String(chord || '').replace('♭', 'b').trim();
+  const parsedChord = parseChordToken(normalizedChord);
+  if (!parsedChord) return normalizedChord;
 
-  const [, root, suffix] = match;
-  const index = scale.indexOf(root);
-  if (index === -1) return chord;
+  const { root, suffix } = parsedChord;
+  const chromaticSharps = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const chromaticFlats = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+  const semitoneMap = {
+    C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3,
+    E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8,
+    A: 9, 'A#': 10, Bb: 10, B: 11,
+  };
 
-  return (index + 1).toString() + (suffix || '');
+  const rootIndex = semitoneMap[root];
+  const keyIndex = semitoneMap[String(key || '').replace('♭', 'b').trim()];
+  if (rootIndex === undefined || keyIndex === undefined) return normalizedChord;
+
+  const relSemitone = (rootIndex - keyIndex + 12) % 12;
+  const nashvilleSharps = ['1', '1#', '2', '2#', '3', '4', '4#', '5', '5#', '6', '6#', '7'];
+  const nashvilleFlats = ['1', '2b', '2', '3b', '3', '4', '5b', '5', '6b', '6', '7b', '7'];
+  const useFlats = root.includes('b') || root.includes('♭') || ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb'].includes(String(key || '').replace('♭', 'b'));
+
+  return (useFlats ? nashvilleFlats[relSemitone] : nashvilleSharps[relSemitone]) + (suffix || '');
 }
 
+function convertUserChordInputToStoredChord(text, selectedKey, originalKey) {
+  const numberRegex = /^([1-7])([b#]?)(.*)$/;
+  if (numberRegex.test(text)) {
+    const [, number, accidental, suffix] = text.match(numberRegex);
+    return transposeChord(`${number}${accidental}${suffix}`, selectedKey, originalKey);
+  }
+  return transposeChord(text, selectedKey, originalKey);
+}
 
 function transposeChordLine(line, fromKey, toKey) {
   const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
@@ -254,31 +291,38 @@ function transposeChordLine(line, fromKey, toKey) {
     }
   }
 
+  const nashvilleNumberRegex = /^[1-7](?:b|#)?(?:\/[1-7](?:b|#)?)?(?:.*)?$/;
+
   return line
     .split(/(\s+|·+)/) // split by space OR dot, keep separators
     .map(part => {
       const trimmed = part.trimStart();
 
       // In Nashville mode, skip numbers like "1", "1/3", "6b", etc.
-      if (nashvilleMode && /^[1-7](b|#)?(\/[1-7](b|#)?)?$/.test(trimmed)) {
+      if (nashvilleMode && nashvilleNumberRegex.test(trimmed)) {
         return part;
+      }
+
+      // When not in Nashville mode, convert numeric Nashville-style degrees to letters.
+      if (!nashvilleMode && nashvilleNumberRegex.test(trimmed)) {
+        return transposeChord(trimmed, fromKey, toKey);
       }
 
       // Detect slash chords like D/F# or C#m7/G
       if (trimmed.includes('/')) {
         const [chordPart, bassPart] = trimmed.split('/');
-        const transposedChord = /^[A-G][b#♭]?/.test(chordPart)
-          ? transposeChord(chordPart, fromKey, toKey)
+        const transposedChord = parseChordToken(chordPart)
+          ? transposeChord(chordPart, fromKey, toKey, { asNashville: nashvilleMode })
           : chordPart;
-        const transposedBass = /^[A-G][b#♭]?/.test(bassPart)
-          ? transposeChord(bassPart, fromKey, toKey)
+        const transposedBass = parseChordToken(bassPart)
+          ? transposeChord(bassPart, fromKey, toKey, { asNashville: nashvilleMode })
           : bassPart;
         return transposedChord + '/' + transposedBass;
       }
 
       // Normal chords (not slash)
-      if (/^[A-G][b#♭]?/.test(trimmed)) {
-        return transposeChord(trimmed, fromKey, toKey);
+      if (parseChordToken(trimmed)) {
+        return transposeChord(trimmed, fromKey, toKey, { asNashville: nashvilleMode });
       }
       return part;
     })
@@ -992,18 +1036,7 @@ function showAllLiveSongsAndSections() {
                 const selectedKey = songObj.currentKey || originalKey;
                 const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
 
-                let finalChord;
-
-                // Handle Nashville numbers
-                const numberRegex = /^([1-7])([b#]?)(.*)$/;
-                if (numberRegex.test(text) && !nashvilleMode) {
-                  const [, number, accidental, suffix] = text.match(numberRegex);
-                  const interpreted = transposeChord(number + accidental + suffix, 'C', selectedKey); // 'C' as root of Nashville
-                  finalChord = transposeChord(interpreted, selectedKey, originalKey);
-                } else {
-                  // Convert regular chord from display key to original key
-                  finalChord = transposeChord(text, selectedKey, originalKey);
-                }
+                const finalChord = convertUserChordInputToStoredChord(text, selectedKey, originalKey);
 
                 // Update chord in data
                 liveSongsData[songObj.name].chords[sectionIdx].chords[chordIdx] = finalChord;
@@ -1686,20 +1719,9 @@ function renderUI() {
           }
         }
         else {
-          const numberRegex = /^([1-7])([b#]?)(.*)$/;
-          const nashvilleMode = localStorage.getItem(`nashvilleMode_${currentUser}`) === 'true';
-
-          if (numberRegex.test(chordText) && !nashvilleMode) {
-            const [, number, accidental, suffix] = chordText.match(numberRegex);
-            const converted = transposeChord(number + accidental + suffix, 'C', selectedKey);
-            currentSongObj.chords[sectionIdx].chords[chordIdx] = transposeChord(converted, selectedKey, originalKey);
-            chordSpan.textContent = converted;
-          }
-          else {
-            const chordInOriginalKey = transposeChord(chordText, selectedKey, originalKey);
-            currentSongObj.chords[sectionIdx].chords[chordIdx] = chordInOriginalKey;
-            chordSpan.textContent = transposeChord(chordInOriginalKey, originalKey, selectedKey);
-          }
+          const storedChord = convertUserChordInputToStoredChord(chordText, selectedKey, originalKey);
+          currentSongObj.chords[sectionIdx].chords[chordIdx] = storedChord;
+          chordSpan.textContent = chordText;
         }
         saveData();
         renderUI();
@@ -2319,8 +2341,8 @@ document.addEventListener('touchend', function (e) {
   const menu = document.querySelector('.menu');
 
   // If the container is not visible, do nothing
-  if (!container || container.style.display === 'none') return; 
-  
+  if (!container || container.style.display === 'none') return;
+
   // If the touch is outside the container and not on the button that shows it
   if (!container.contains(e.target) && !e.target.matches('#hideShowBtn')) {
     container.style.display = 'none';

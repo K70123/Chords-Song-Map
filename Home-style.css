@@ -387,7 +387,7 @@ body.loading {
 .song-actions-menu {
     position: absolute;
     top: 100%;
-    left: 100%;
+    right: 15%;
     transform: translateY(-50%);
     background-color: var(--color-background);
     border: 1px solid var(--color-border);
