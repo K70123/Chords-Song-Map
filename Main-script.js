@@ -815,6 +815,7 @@ function showAllLiveSongsAndSections() {
       if (Array.isArray(window.keyList)) {
         const keyContainer = document.createElement('div');
         keyContainer.className = 'keyContainer';
+        keyContainer.style.marginTop = '0';
         window.keyList.forEach(key => {
           const keyBtn = document.createElement('button');
           keyBtn.className = 'key';
