@@ -207,7 +207,24 @@ function transposeChord(chord, fromKey, toKey, options = {}) {
     ? chromaticSharps.indexOf(toKey)
     : chromaticFlats.indexOf(toKey);
 
-  const rootIdx = chromatic.indexOf(root);
+  // Try to find the root in the chosen chromatic. If it's not present (e.g. root is C# but
+  // we are using flats because the target/key prefers flats such as F), map the sharp
+  // representation to its enharmonic equivalent in the chosen chromatic scale.
+  let rootIdx = chromatic.indexOf(root);
+  if (rootIdx === -1) {
+    const altIdx = chromaticSharps.indexOf(root);
+    if (altIdx !== -1) {
+      const altRoot = chromatic[altIdx];
+      rootIdx = chromatic.indexOf(altRoot);
+    } else {
+      const altIdx2 = chromaticFlats.indexOf(root);
+      if (altIdx2 !== -1) {
+        const altRoot2 = chromatic[altIdx2];
+        rootIdx = chromatic.indexOf(altRoot2);
+      }
+    }
+  }
+
   if (fromIdx === -1 || toIdx === -1 || rootIdx === -1) return normalizedChord;
 
   const shift = (toIdx - fromIdx + 12) % 12;
@@ -658,7 +675,7 @@ function showAllLiveSongsAndSections() {
           warning.style.fontSize = '13px';
         }
         warning.className = 'warning'
-        warning.textContent = 'No Song Map Displayed'
+        warning.textContent = 'Not Displayed'
         liveSongMapContainer.appendChild(warning);
       }
       const addPartBtn = liveSongMapContainer.querySelector('.addPartBtn');
