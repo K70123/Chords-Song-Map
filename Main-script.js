@@ -2243,7 +2243,6 @@ function renderUI() {
   }
   renderSongMap((currentSongObj && currentSongObj.songMap) || []);
 
-
   // After rendering, check if nextChordFocus is set
   if (nextChordFocus) {
     const allSections = Array.from(container.querySelectorAll('.songSectionContainer'));
@@ -2272,6 +2271,26 @@ function renderUI() {
 
 // --- Intial Render ---
 renderUI();
+
+
+//--- Hide/Show Song Map ---
+function hideShowMap() {
+  const songMapContainer = document.querySelector('.songMapContainer');
+  if (songMapContainer.style.display === 'none' || songMapContainer.style.display === '') {
+    songMapContainer.style.display = 'block';
+  }
+  else {
+    songMapContainer.style.display = 'none';
+  }
+
+  const liveSongMapContainer = document.querySelector('.liveSongMapContainer');
+  if (liveSongMapContainer.style.display === 'none' || liveSongMapContainer.style.display === '') {
+    liveSongMapContainer.style.display = 'block';
+  }
+  else {
+    liveSongMapContainer.style.display = 'none';
+  }
+}
 
 
 // --- Dark Mode ---
